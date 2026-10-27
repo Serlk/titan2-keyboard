@@ -13,4 +13,11 @@ package() {
 	install -d "$pkgdir"/usr/lib/titan "$pkgdir"/usr/share/titan-keyboard
 	cp -r "$startdir"/titan_keyboard "$pkgdir"/usr/lib/titan/
 	cp -r "$startdir"/data "$pkgdir"/usr/share/titan-keyboard/
+	install -Dm644 "$startdir"/data/share/applications/org.titan.KeyboardSettings.desktop \
+		"$pkgdir"/usr/share/applications/org.titan.KeyboardSettings.desktop
+	sed -i 's|^Exec=.*|Exec=titan-keyboard-settings|' "$pkgdir"/usr/share/applications/org.titan.KeyboardSettings.desktop
+	install -Dm755 /dev/stdin "$pkgdir"/usr/bin/titan-keyboard-settings <<-EOF2
+		#!/bin/sh
+		PYTHONPATH=/usr/lib/titan exec python3 -m titan_keyboard.settings "\$@"
+	EOF2
 }

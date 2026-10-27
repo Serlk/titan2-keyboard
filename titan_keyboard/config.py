@@ -30,6 +30,13 @@ double_tap_ms = 500        # двойной тап ⇧ / alt / fn — фикса
 multitap_ms = 450          # повтор клавиши для мульти-тапа (е → ё)
 
 snippet_prefix = "!"       # !имя + пробел — раскрыть сниппет
+
+# Помощь при наборе. В паролях, адресах, почте, числах и терминале она
+# выключена всегда, независимо от этих настроек.
+suggestions = true
+autocorrect = true
+autocapitalize = true
+learn = true               # запоминать свои слова для подсказок
 """
 
 
@@ -41,7 +48,34 @@ class Config:
     double_tap_ms: int = 500
     multitap_ms: int = 450
     snippet_prefix: str = "!"
+    suggestions: bool = True
+    autocorrect: bool = True
+    autocapitalize: bool = True
+    learn: bool = True
     problems: list = field(default_factory=list)
+
+
+def _toml(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml(x) for x in v) + "]"
+    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def save(cfg, path=CONFIG):
+    """Записать настройки (пишет программа настроек; демон перечитает сам)."""
+    lines = ["# Настройки клавиатуры Titan — меняются и в программе «Клавиатура Titan».", ""]
+    for f in fields(Config):
+        if f.name != "problems":
+            lines.append(f"{f.name} = {_toml(getattr(cfg, f.name))}")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
 
 
 def load(path=CONFIG, available_layouts=None):

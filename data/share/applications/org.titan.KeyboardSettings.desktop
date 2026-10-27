@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Клавиатура Titan
+Name[en]=Titan Keyboard
+Comment=Раскладки, долгое нажатие, подсказки, сниппеты
+Keywords=keyboard;клавиатура;раскладка;сниппеты;plektra;
+Exec=python3 -m titan_keyboard.settings
+Icon=input-keyboard
+Categories=Settings;
+StartupNotify=false

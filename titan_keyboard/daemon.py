@@ -39,7 +39,7 @@ from .expansion import Expander, shortcode_query
 from .ime import InputMethod
 from .symview import SymView
 from .variations import Variations
-from .words import Suggester, current_word
+from .words import Learned, Suggester, current_word
 
 # после чего слово закончено: учим его и проверяем автокоррекцию
 WORD_END = set(" .,!?;:")
@@ -216,7 +216,14 @@ class Daemon:
                 msg = json.loads(line)
             except ValueError:
                 continue
-            if msg.get("cmd") == "pick_x" and self.entries:
+            if msg.get("cmd") == "reload":
+                # программа настроек поменяла файлы: настройки, исправления, выученные слова
+                self._load_config()
+                self.corrector = AutoCorrector()
+                self.suggester.learned = Learned()
+                log("настройки перечитаны по команде")
+                self._state_changed()
+            elif msg.get("cmd") == "pick_x" and self.entries:
                 self.pick(min(len(self.entries) - 1, int(float(msg["x"]) * len(self.entries))))
         return True
 
@@ -332,8 +339,15 @@ class Daemon:
         log("полоса:", kind, repr(old), "→", repr(new))
 
     def _policy(self):
+        """Что можно в этом поле: тип поля (policy) и выключатели из настроек."""
         st = self.ime.state
-        return policy(st.purpose, st.hint, st.private)
+        p = dict(policy(st.purpose, st.hint, st.private))
+        c = self.cfg
+        p["suggest"] = p["suggest"] and c.suggestions
+        p["autocorrect"] = p["autocorrect"] and c.autocorrect
+        p["autocap"] = p["autocap"] and c.autocapitalize
+        p["learn"] = p["learn"] and c.learn
+        return p
 
     def _maybe_autocap(self):
         """Заглавная в начале поля и предложения (Plektra smart shift)."""
