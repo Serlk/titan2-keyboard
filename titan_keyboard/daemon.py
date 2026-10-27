@@ -30,9 +30,11 @@ from gi.repository import GLib
 
 from titan_device import keymaps
 
-from .bar import LedBar
+from .bar import ItemsBar, LedBar
 from .engine import Commit, Delete, Engine, Key, Keys
+from .expansion import Expander, shortcode_query
 from .ime import InputMethod
+from .variations import Variations
 
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 SOCK = os.path.join(RUN, "titan-keyboard.sock")
@@ -87,11 +89,15 @@ class Daemon:
         self.ctrl = 0
         self.titan = False
         self.shell = None
+        self.expander = Expander()
+        self.variations = Variations()
+        self.entries = []               # пункты полосы: (подпись, приглушённо, действие)
         try:
             self.bar = LedBar()
-        except Exception as e:          # без layer-shell клавиатура работает и без полосы
-            log("полоса индикаторов недоступна:", e)
-            self.bar = None
+            self.items_bar = ItemsBar(self.pick)
+        except Exception as e:          # без layer-shell клавиатура работает и без полос
+            log("полосы недоступны:", e)
+            self.bar = self.items_bar = None
         self.ime = InputMethod(self._field)
         if not self.ime.available:
             log("IME занят другим методом ввода: буквы пойдут как обычные клавиши")
@@ -122,8 +128,29 @@ class Daemon:
         self._send_to(conn, {"ev": "titan", "on": self.titan})
         self._send_to(conn, {"ev": "field", **self._field_info()})
         self._send_to(conn, {"ev": "state", **self.engine.state()})
-        GLib.io_add_watch(conn.fileno(), GLib.IO_HUP | GLib.IO_ERR, self._gone, conn)
+        self._send_to(conn, {"ev": "bar", "n": len(self.entries)})
+        conn.setblocking(False)
+        GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self._from_subscriber, conn)
         log("подписчик подключился")
+        return True
+
+    def _from_subscriber(self, fd, cond, conn):
+        """Команды подписчика: {"cmd": "pick_x", "x": 0..1} — пункт полосы под пальцем."""
+        try:
+            data = conn.recv(4096) if cond & GLib.IO_IN else b""
+        except BlockingIOError:
+            return True
+        except OSError:
+            data = b""
+        if not data:
+            return self._gone(fd, cond, conn)
+        for line in data.splitlines():
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("cmd") == "pick_x" and self.entries:
+                self.pick(min(len(self.entries) - 1, int(float(msg["x"]) * len(self.entries))))
         return True
 
     def _gone(self, fd, cond, conn):
@@ -163,6 +190,7 @@ class Daemon:
         self.publish(ev="state", **self.engine.state())
         self._shell()
         self._bar()
+        self._refresh_items()
 
     def _bar(self):
         """Полоса видна, когда открыто поле ввода или включён модификатор."""
@@ -181,6 +209,60 @@ class Daemon:
         self.publish(ev="field", **self._field_info())
         self._shell()
         self._bar()
+        self._refresh_items()
+
+    # ---------------------------------------------------------- полоса вариаций и раскрытия
+
+    def _refresh_items(self):
+        st = self.ime.state
+        entries = []
+        if self.titan and st.active and self.ime.available:
+            before = st.before_cursor
+            q = self.expander.query(before)
+            if q:
+                for m in self.expander.matches(q, 6):
+                    entries.append((m.display, False, ("expand", q.token, m.replacement)))
+            if not entries:
+                es = self.engine.state()
+                for it in self.variations.items(before, st.purpose, self.engine.layout,
+                                                es["shift"] != "off", es["alt"] != "off"):
+                    entries.append((it.text, not it.replace_last,
+                                    ("replace", before[-1:], it.text) if it.replace_last else ("insert", "", it.text)))
+        self.entries = entries[:7]
+        if self.items_bar:
+            self.items_bar.update([(label, quiet) for label, quiet, _ in self.entries])
+        self.publish(ev="bar", n=len(self.entries))
+
+    def pick(self, i):
+        """Выбор пункта полосы: тапом по экрану или свайпом вверх на сенсоре."""
+        if not (0 <= i < len(self.entries)):
+            return
+        _, _, (kind, old, new) = self.entries[i]
+        if old:
+            self.ime.delete_string(old)
+        self.ime.commit_string(new)
+        log("полоса:", kind, repr(old), "→", repr(new))
+
+    def _expand_on_space(self):
+        """Пробел после точного сниппета или шорткода раскрывает его."""
+        q = self.expander.query(self.ime.state.before_cursor)
+        m = q and self.expander.exact(q)
+        if not m:
+            return False
+        self.ime.delete_string(q.token)
+        self.ime.commit_string(m.replacement + " ")
+        return True
+
+    def _close_shortcode(self):
+        """Закрывающее «:» сразу превращает :имя: в эмодзи или символ."""
+        before = self.ime.state.before_cursor
+        q = shortcode_query(before + ":")
+        m = q and q.closed and self.expander.exact(q)
+        if not m:
+            return False
+        self.ime.delete_string(q.token[:-1])
+        self.ime.commit_string(m.replacement)
+        return True
 
     # ---------------------------------------------------------- захват
 
@@ -203,6 +285,7 @@ class Daemon:
         log("Titan-ввод", "ВКЛ" if on else "выкл")
         self.publish(ev="titan", on=on)
         self._bar()
+        self._refresh_items()
 
     # ---------------------------------------------------------- ввод
 
@@ -289,6 +372,10 @@ class Daemon:
 
     def _apply(self, actions):
         for a in actions:
+            if isinstance(a, Commit) and a.text == " " and self._expand_on_space():
+                continue
+            if isinstance(a, Commit) and a.text == ":" and self._close_shortcode():
+                continue
             if isinstance(a, Commit):
                 if not self.ime.commit_string(a.text):
                     log("поле ввода пропало, символ не вставлен:", a.text)

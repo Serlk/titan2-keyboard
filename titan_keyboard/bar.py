@@ -17,7 +17,8 @@ import gi
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Gdk, Gtk, Gtk4LayerShell as LS  # noqa: E402
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gdk, Gtk, Gtk4LayerShell as LS, Pango, PangoCairo  # noqa: E402
 
 LED_HEIGHT = 5.5
 LED_RADIUS = 3.0
@@ -96,3 +97,85 @@ class LedBar:
                 cr.stroke()
             else:
                 cr.fill()
+
+
+BAR_HEIGHT = 30
+BAR_BG = (0.06, 0.065, 0.08)
+BAR_TEXT = (0.925, 0.933, 0.95)
+BAR_MUTED = (0.55, 0.57, 0.62)
+BAR_SEP = (1, 1, 1, 0.08)
+
+
+class ItemsBar:
+    """Полоса вариаций и раскрытия над полосой подписей оболочки.
+
+    Пункты делят ширину поровну (как кнопки вариаций Plektra); тап по пункту —
+    выбор. Пока полоса видна, она занимает место (exclusive zone) — окно программы
+    становится ниже, ничего не перекрывается.
+    """
+
+    def __init__(self, on_pick):
+        self.items = []          # [(подпись, приглушённая?)]
+        self.on_pick = on_pick
+        self.win = Gtk.Window()
+        self.win.add_css_class("titan-led")
+        LS.init_for_window(self.win)
+        LS.set_layer(self.win, LS.Layer.TOP)
+        LS.set_namespace(self.win, "titan-keyboard-bar")
+        LS.set_keyboard_mode(self.win, LS.KeyboardMode.NONE)
+        for e in (LS.Edge.BOTTOM, LS.Edge.LEFT, LS.Edge.RIGHT):
+            LS.set_anchor(self.win, e, True)
+        LS.set_exclusive_zone(self.win, 0)
+        self.win.set_default_size(480, BAR_HEIGHT)
+        self.area = Gtk.DrawingArea()
+        self.area.set_content_height(BAR_HEIGHT)
+        self.area.set_draw_func(self._draw)
+        click = Gtk.GestureClick()
+        click.connect("released", self._clicked)
+        self.area.add_controller(click)
+        self.win.set_child(self.area)
+        self.shown = False
+
+    def update(self, items):
+        self.items = items
+        show = bool(items)
+        if show != self.shown:
+            self.shown = show
+            if show:
+                LS.set_exclusive_zone(self.win, BAR_HEIGHT)
+                self.win.present()
+            else:
+                self.win.set_visible(False)
+        self.area.queue_draw()
+
+    def _clicked(self, gesture, n, x, y):
+        w = self.area.get_width()
+        if self.items and w:
+            self.on_pick(min(len(self.items) - 1, int(x / w * len(self.items))))
+
+    def _draw(self, area, cr, w, h):
+        cr.set_source_rgb(*BAR_BG)
+        cr.paint()
+        n = len(self.items)
+        if not n:
+            return
+        cw = w / n
+        for i, (label, quiet) in enumerate(self.items):
+            if i:
+                cr.set_source_rgba(*BAR_SEP)
+                cr.rectangle(i * cw, 6, 1, h - 12)
+                cr.fill()
+            self._text(cr, label, i * cw + cw / 2, h / 2, cw - 8, BAR_MUTED if quiet else BAR_TEXT)
+
+    @staticmethod
+    def _text(cr, s, cx, cy, maxw, color):
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription.from_string("DejaVu Sans 15px"))
+        lay.set_text(s, -1)
+        lay.set_width(int(maxw * Pango.SCALE))
+        lay.set_ellipsize(Pango.EllipsizeMode.END)
+        lay.set_alignment(Pango.Alignment.CENTER)
+        tw, th = lay.get_pixel_size()
+        cr.set_source_rgb(*color)
+        cr.move_to(cx - maxw / 2, cy - th / 2)
+        PangoCairo.show_layout(cr, lay)

@@ -144,6 +144,15 @@ class InputMethod:
         self.display.flush()
         return True
 
+    def delete_string(self, text):
+        """Удалить перед курсором именно эту строку (её байты известны точно)."""
+        if not self.state.active or not text:
+            return False
+        self.im.delete_surrounding_text(len(text.encode()), 0)
+        self.im.commit(self.state.serial)
+        self.display.flush()
+        return True
+
     def preedit(self, text, cursor=None):
         if not self.state.active:
             return False

@@ -13,6 +13,7 @@ done
 cp "$A"/common/sym/*.json "$DST/sym/"
 cp "$A"/common/variations/*.json "$DST/variations/"
 cp "$A"/common/ctrl/*.json "$DST/ctrl/"
+cp "$A/common/emoji_shortcodes.json" "$A/common/symbol_shortcodes.json" "$DST/"
 cp -r "$A/devices/titan2" "$DST/devices/"
 cp "$SRC/LICENSE" "$DST/LICENSE"
 {
