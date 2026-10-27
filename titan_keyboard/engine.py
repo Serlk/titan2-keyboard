@@ -17,6 +17,11 @@ https://github.com/djbclark/plektra-djbclark):
   порога — заменяется alt-символом, заглавной, первой вариацией или символом
   sym (inputmethod/AlternateCharacterManager.kt, scheduleLongPress).
 
+Режим терминала (не из Plektra — для шелла и vim): fn — настоящий Ctrl без
+навигационного слоя (fn+C = ^C, fn+D = ^D), удержание пробела — Tab, Meta (Alt
+программ) — залипающий модификатор с полосы доп. клавиш. Долгое нажатие букв
+в терминале выключено: заменить уже вставленный символ там ненадёжно.
+
 Данные — в data/plektra в форматах Plektra.
 """
 
@@ -140,6 +145,8 @@ class Engine:
         self.long_press_s = cfg.long_press_ms / 1000 if cfg else 0.3
         self.variation_of = variation_of or (lambda ch: None)   # символ → первая вариация
         self._press = {}               # буква → [время, вставленное, заглавная, сработало]
+        self.terminal = False          # режим терминала (ставит демон по полю/программе)
+        self._space = None             # [время, сработало] — пробел в терминале ждёт отпускания
         self.order = list(self.layouts)
         self.layout = self.order[0]
         self.alt_map = _load(f"{data}/devices/{device}/device_sym_key_mappings.json")
@@ -148,6 +155,7 @@ class Engine:
         self.shift = Modifier(dt)
         self.alt = Modifier(dt)
         self.ctrl = Modifier(dt)       # fn на Titan 2, как в Plektra
+        self.meta = Modifier(dt)       # Alt программ (Meta) — только с полосы доп. клавиш терминала
         self.sym_page = 0              # 0 — обычный ввод
         self._multi = None             # (клавиша, индекс тапа, время, длина вставленного, заглавная)
 
@@ -155,7 +163,8 @@ class Engine:
 
     def state(self):
         return {"layout": self.layout, "shift": self.shift.state, "alt": self.alt.state,
-                "ctrl": self.ctrl.state, "sym": self.sym_page}
+                "ctrl": self.ctrl.state, "meta": self.meta.state, "sym": self.sym_page,
+                "terminal": self.terminal}
 
     # ---------------------------------------------------------- события
 
@@ -184,6 +193,10 @@ class Engine:
             self.layout = self.order[(self.order.index(self.layout) + 1) % len(self.order)]
             self._multi = None
             return []
+        if key == "SPACE" and self.terminal:
+            self._multi = None
+            self._space = [t, False]      # пробел или Tab — станет ясно по отпусканию
+            return []
         if key == "SPACE":
             self._multi = None
             self._after_char()
@@ -196,6 +209,9 @@ class Engine:
     def tick(self, t):
         """Долгое нажатие: заменить уже вставленную букву, пока клавиша держится."""
         out = []
+        if self._space and not self._space[1] and t - self._space[0] >= self.long_press_s:
+            self._space[1] = True
+            out.append(Keys("tab"))       # удержание пробела в терминале — Tab (дополнение)
         for key, p in self._press.items():
             t0, inserted, upper, fired = p
             if fired or t - t0 < self.long_press_s or self.long_press == "off":
@@ -206,6 +222,14 @@ class Engine:
                 self._multi = None
                 out += [Delete(len(inserted)), Commit(ch)]
         return out
+
+    def cancel(self, key):
+        """Нажатие оказалось жестом («нажал и повёл»): забыть его — ни долгого нажатия, ни мульти-тапа."""
+        self._press.pop(key, None)
+        if self._multi and self._multi[0] == key:
+            self._multi = None
+        if key == "SPACE":
+            self._space = None
 
     def _long_press_char(self, key, inserted, upper):
         kc = _keycode(key)
@@ -222,6 +246,13 @@ class Engine:
 
     def key_up(self, key, t):
         self._press.pop(key, None)
+        if key == "SPACE" and self._space is not None:
+            fired = self._space[1]
+            self._space = None
+            if not fired:
+                self._after_char()
+                return [Commit(" ")]
+            return []
         if key == "SHIFT":
             self.shift.up(t)
         elif key == "ALT":
@@ -234,6 +265,14 @@ class Engine:
 
     def _letter(self, key, t):
         kc = _keycode(key)
+        if self.meta.active:
+            self.meta.use()
+            self._multi = None
+            return [Keys("alt+" + key.lower())]
+        if self.ctrl.active and self.terminal:
+            self.ctrl.use()
+            self._multi = None
+            return [Keys("ctrl+" + key.lower())]     # в терминале fn — настоящий Ctrl
         if self.ctrl.active:
             self.ctrl.use()
             self._multi = None
@@ -272,7 +311,8 @@ class Engine:
             return out
         ch = spec["uppercase" if upper else "lowercase"]
         self._multi = (key, 0, t, len(ch), upper) if taps else None
-        self._press[key] = [t, ch, upper, False]
+        if not self.terminal:
+            self._press[key] = [t, ch, upper, False]
         self._after_char()
         out.append(Commit(ch))
         return out

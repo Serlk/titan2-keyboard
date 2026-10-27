@@ -107,6 +107,24 @@ class TestEngine(unittest.TestCase):
         self.assertEqual(e.layout, "russian_standard")
         self.assertEqual(e.multitap_s, 0.2)
 
+    def test_terminal_fn_is_real_ctrl(self):
+        self.e.terminal = True
+        self.assertEqual(self.tap("FN") + self.tap("C"), [Keys("ctrl+c")])
+        self.assertEqual(self.tap("FN") + self.tap("E"), [Keys("ctrl+e")])    # не стрелка
+        self.e.terminal = False
+        self.assertEqual(self.tap("FN") + self.tap("E"), [Keys("up")])
+
+    def test_terminal_space_hold_is_tab(self):
+        self.e.terminal = True
+        self.assertEqual(self.tap("SPACE"), [Commit(" ")])                    # короткий — пробел
+        self.assertEqual(self._hold("SPACE", 0.4), [Keys("tab")])             # долгий — Tab
+        self.assertEqual(self._hold("Q", 0.4), [Commit("q")])                 # буквы без долгого
+
+    def test_meta_from_extra_keys(self):
+        self.e.meta.one_shot = True
+        self.assertEqual(self.tap("B"), [Keys("alt+b")])
+        self.assertEqual(self.text("B"), "b")
+
     def test_non_text_keys_pass_through(self):
         self.assertEqual(self.tap("ENTER"), [Key("ENTER")])
         self.assertEqual(self.tap("BKSP"), [Key("BKSP")])

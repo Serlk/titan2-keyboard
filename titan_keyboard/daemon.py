@@ -19,6 +19,7 @@
 
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -45,6 +46,14 @@ from .words import Learned, Suggester, current_word
 WORD_END = set(" .,!?;:")
 
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+# терминалы по app_id — если программа не сообщает тип поля «терминал»
+TERMINAL_APPS = re.compile(r"^(foot|footclient|Alacritty|kitty|org\.wezfurlong\.wezterm|com\.mitchellh\.ghostty"
+                           r"|org\.gnome\.(Console|Terminal|Ptyxis)|org\.kde\.konsole|xterm|URxvt)$")
+TERMINAL_PURPOSE = 13      # zwp_text_input_v3.content_purpose.terminal
+# полоса доп. клавиш терминала — как в Termux
+TERMINAL_KEYS = [("Esc", "key", "esc"), ("Tab", "key", "tab"), ("Ctrl", "mod", "ctrl"), ("Alt", "mod", "meta"),
+                 ("←", "key", "left"), ("↓", "key", "down"), ("↑", "key", "up"), ("→", "key", "right"),
+                 ("|", "insert", "|"), ("~", "insert", "~")]
 SOCK = os.path.join(RUN, "titan-keyboard.sock")
 SHELL_SOCK = os.path.join(RUN, "titan-shell.sock")
 
@@ -103,6 +112,8 @@ class Daemon:
         self.corrector = AutoCorrector()
         self.clipboard = History()
         self.entries = []               # пункты полосы: (подпись, приглушённо, действие)
+        self.last_commit = None         # (клавиша, текст) — для отзыва, если нажатие стало жестом
+        self.app_id = ""                # программа в фокусе (сообщает titan-gestured)
         try:
             self.bar = LedBar()
             self.items_bar = ItemsBar(self.pick)
@@ -216,7 +227,12 @@ class Daemon:
                 msg = json.loads(line)
             except ValueError:
                 continue
-            if msg.get("cmd") == "reload":
+            if msg.get("cmd") == "retract":
+                self._retract(msg.get("key"))
+            elif msg.get("cmd") == "app":
+                self.app_id = msg.get("id") or ""
+                self._update_terminal()
+            elif msg.get("cmd") == "reload":
                 # программа настроек поменяла файлы: настройки, исправления, выученные слова
                 self._load_config()
                 self.corrector = AutoCorrector()
@@ -226,6 +242,21 @@ class Daemon:
             elif msg.get("cmd") == "pick_x" and self.entries:
                 self.pick(min(len(self.entries) - 1, int(float(msg["x"]) * len(self.entries))))
         return True
+
+    def _retract(self, key):
+        """Подписчик понял, что нажатие было жестом: стереть символ, вставленный этой клавишей."""
+        self.engine.cancel(key)
+        last = self.last_commit
+        self.last_commit = None
+        if not last or last[0] != key:
+            return
+        text = last[1]
+        if self.ime.state.text:
+            self.ime.delete_string(text)          # программа сообщает текст — удаляем точно
+        else:
+            for _ in text:                         # терминалы обычно не сообщают — стираем ⌫
+                self._tap(E.KEY_BACKSPACE)
+        log("отозвано:", repr(text), "(жест", key + ")")
 
     def _gone(self, fd, cond, conn):
         if conn in self.subscribers:
@@ -281,6 +312,7 @@ class Daemon:
         return {"active": st.active, "purpose": int(st.purpose), "private": st.private}
 
     def _field(self, st):
+        self._update_terminal()
         self.publish(ev="field", **self._field_info())
         self._shell()
         self._bar()
@@ -289,10 +321,31 @@ class Daemon:
 
     # ---------------------------------------------------------- полоса вариаций и раскрытия
 
+    def _update_terminal(self):
+        term = self.ime.state.active and (int(self.ime.state.purpose) == TERMINAL_PURPOSE
+                                          or bool(TERMINAL_APPS.match(self.app_id)))
+        if term != self.engine.terminal:
+            self.engine.terminal = term
+            log("режим терминала", "вкл" if term else "выкл", self.app_id)
+            self._state_changed()
+
+    def _terminal_entries(self):
+        es = self.engine.state()
+        out = []
+        for label, kind, value in TERMINAL_KEYS:
+            if kind == "mod":
+                st = es["ctrl" if value == "ctrl" else "meta"]
+                label = label + (" ●" if st == "on" else " ◉" if st == "lock" else "")
+            out.append((label, False, (kind, "", value)))
+        return out
+
     def _refresh_items(self):
         st = self.ime.state
         entries = []
-        if self.titan and st.active and self.ime.available:
+        if self.titan and st.active and self.ime.available and self.engine.terminal \
+                and self.engine.sym_page != self.engine.CLIPBOARD_PAGE:
+            entries = self._terminal_entries()
+        elif self.titan and st.active and self.ime.available:
             before = self.ime.before
             pol = self._policy()
             word, prev = current_word(before)
@@ -318,7 +371,7 @@ class Daemon:
                                                 es["shift"] != "off", es["alt"] != "off"):
                     entries.append((it.text, not it.replace_last,
                                     ("replace", before[-1:], it.text) if it.replace_last else ("insert", "", it.text)))
-        self.entries = entries[:7]
+        self.entries = entries[:len(TERMINAL_KEYS) if self.engine.terminal else 7]
         if self.items_bar:
             self.items_bar.update([(label, quiet) for label, quiet, _ in self.entries])
         self.publish(ev="bar", n=len(self.entries))
@@ -329,6 +382,15 @@ class Daemon:
             return
         _, _, (kind, old, new) = self.entries[i]
         if not new:
+            return
+        if kind == "key":
+            self._apply([Keys(new)])
+            return
+        if kind == "mod":
+            mod = self.engine.ctrl if new == "ctrl" else self.engine.meta
+            mod.one_shot = not mod.one_shot and not mod.latched
+            mod.latched = False
+            self._state_changed()
             return
         if kind == "suggest" and self._policy()["learn"]:
             self.suggester.learned.learn(new.strip(), current_word(self.ime.before)[1])
@@ -347,6 +409,8 @@ class Daemon:
         p["autocorrect"] = p["autocorrect"] and c.autocorrect
         p["autocap"] = p["autocap"] and c.autocapitalize
         p["learn"] = p["learn"] and c.learn
+        if self.engine.terminal:
+            p = {k: False for k in p}         # терминал: без подсказок, коррекции, заглавной и обучения
         return p
 
     def _maybe_autocap(self):
@@ -491,6 +555,9 @@ class Daemon:
                 self._maybe_autocap()
             before = self.engine.state()
             actions = self.engine.key_down(name, t) if value else self.engine.key_up(name, t)
+            commits = [a.text for a in actions if isinstance(a, Commit)]
+            if value and commits:
+                self.last_commit = (name, commits[-1])
             self._apply(actions)
             if self.engine.state() != before:
                 self._state_changed()
