@@ -1,0 +1,22 @@
+#!/bin/sh
+# Синхронизация данных Plektra (GPLv3): раскладки, страницы sym, вариации, профиль Titan 2.
+#   scripts/sync-plektra /путь/к/клону/plektra
+# Данные берутся без изменений; версия апстрима — в data/plektra/UPSTREAM.
+set -e
+SRC=${1:?путь к клону plektra}
+A="$SRC/app/src/main/assets"
+DST=$(cd "$(dirname "$0")/.." && pwd)/data/plektra
+rm -rf "$DST"; mkdir -p "$DST/layouts" "$DST/sym" "$DST/variations" "$DST/devices"
+for l in qwerty russian_jcuken russian_standard russian_translit ukrainian; do
+    cp "$A/common/layouts/$l.json" "$DST/layouts/"
+done
+cp "$A"/common/sym/*.json "$DST/sym/"
+cp "$A"/common/variations/*.json "$DST/variations/"
+cp -r "$A/devices/titan2" "$DST/devices/"
+cp "$SRC/LICENSE" "$DST/LICENSE"
+{
+    echo "source: https://github.com/djbclark/plektra-djbclark"
+    echo "commit: $(git -C "$SRC" rev-parse HEAD)"
+    echo "date:   $(git -C "$SRC" log -1 --format=%cs)"
+} > "$DST/UPSTREAM"
+echo "готово: $DST"; cat "$DST/UPSTREAM"
