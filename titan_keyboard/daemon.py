@@ -30,12 +30,14 @@ from gi.repository import GLib
 
 from titan_device import keymaps
 
+from . import config
 from .autocorrect import AutoCorrector, policy, should_capitalize
 from .bar import ItemsBar, LedBar
 from .clipboard import ClipboardWatcher, History
-from .engine import Commit, Delete, Engine, Key, Keys
+from .engine import DATA, Commit, Delete, Engine, Key, Keys
 from .expansion import Expander, shortcode_query
 from .ime import InputMethod
+from .symview import SymView
 from .variations import Variations
 from .words import Suggester, current_word
 
@@ -88,15 +90,15 @@ class Daemon:
             self.name_to_code.setdefault(name, code)
         self.ui = UInput({E.EV_KEY: list(range(1, 249)) + [E.KEY_BACK, E.KEY_APPSELECT]},
                          name="titan-keyboard-virtual")
-        self.engine = Engine()
+        self.variations = Variations()
+        self._load_config()
         self.t0 = time.monotonic()
         self.subscribers = []
         self.raw_down = set()
         self.ctrl = 0
         self.titan = False
         self.shell = None
-        self.expander = Expander()
-        self.variations = Variations()
+        self.expander = Expander(prefix=self.cfg.snippet_prefix)
         self.suggester = Suggester()
         self.corrector = AutoCorrector()
         self.clipboard = History()
@@ -104,9 +106,10 @@ class Daemon:
         try:
             self.bar = LedBar()
             self.items_bar = ItemsBar(self.pick)
+            self.symview = SymView(self._sym_pick)
         except Exception as e:          # без layer-shell клавиатура работает и без полос
             log("полосы недоступны:", e)
-            self.bar = self.items_bar = None
+            self.bar = self.items_bar = self.symview = None
         self.ime = InputMethod(self._field)
         if not self.ime.available:
             log("IME занят другим методом ввода: буквы пойдут как обычные клавиши")
@@ -114,9 +117,63 @@ class Daemon:
         self.clip_watch = ClipboardWatcher(self.clipboard, self._refresh_items)
         self._listen()
         GLib.io_add_watch(self.kbd.fd, GLib.IO_IN, self._kbd_events)
+        GLib.timeout_add(20, self._tick)
         log("клавиатура:", self.kbd.name, "| профиль:", "Titan 2" if self.on_device else "ноутбук")
         if self.on_device:
             self.set_titan(True)
+
+    # ---------------------------------------------------------- настройки
+
+    def _load_config(self):
+        layouts = {f[:-5] for f in os.listdir(f"{DATA}/layouts") if f.endswith(".json")}
+        self.cfg = config.load(available_layouts=layouts)
+        for p in self.cfg.problems:
+            log("config.toml:", p)
+        try:
+            self.cfg_mtime = os.path.getmtime(config.CONFIG)
+        except OSError:
+            self.cfg_mtime = None
+        prev = getattr(self, "engine", None)
+        self.engine = Engine(cfg=self.cfg, variation_of=self._first_variation)
+        if prev and prev.layout in self.engine.order:
+            self.engine.layout = prev.layout     # раскладку при перечитывании не сбрасываем
+        if getattr(self, "expander", None):
+            self.expander.prefix = self.cfg.snippet_prefix
+
+    def _first_variation(self, ch):
+        v = self.variations.map.get(ch)
+        return v[0] if v else None
+
+    def _tick(self):
+        # долгое нажатие
+        if self.titan and self.ime.state.active:
+            actions = self.engine.tick(time.monotonic() - self.t0)
+            if actions:
+                self._apply(actions)
+        # config.toml поменяли — перечитать на лету
+        self._cfg_check = getattr(self, "_cfg_check", 0) + 1
+        if self._cfg_check % 100 == 0:
+            try:
+                mtime = os.path.getmtime(config.CONFIG)
+            except OSError:
+                mtime = None
+            if mtime != self.cfg_mtime:
+                self._load_config()
+                log("config.toml перечитан")
+                self._state_changed()
+        return True
+
+    # ---------------------------------------------------------- страница sym на экране
+
+    def _symview(self):
+        if not self.symview:
+            return
+        page = self.engine.sym_page
+        show = self.titan and self.ime.state.active and 1 <= page <= len(self.engine.sym_maps)
+        self.symview.update(page if show else 0, self.engine.sym_maps[page - 1] if show else {})
+
+    def _sym_pick(self, ch):
+        self.ime.commit_string(ch)
 
     # ---------------------------------------------------------- подписчики
 
@@ -201,6 +258,7 @@ class Daemon:
         self._shell()
         self._bar()
         self._refresh_items()
+        self._symview()
 
     def _bar(self):
         """Полоса видна, когда открыто поле ввода или включён модификатор."""
@@ -220,6 +278,7 @@ class Daemon:
         self._shell()
         self._bar()
         self._refresh_items()
+        self._symview()
 
     # ---------------------------------------------------------- полоса вариаций и раскрытия
 
@@ -343,6 +402,7 @@ class Daemon:
         self.publish(ev="titan", on=on)
         self._bar()
         self._refresh_items()
+        self._symview()
 
     # ---------------------------------------------------------- ввод
 

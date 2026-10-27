@@ -79,6 +79,34 @@ class TestEngine(unittest.TestCase):
         st = self.e.state()
         self.assertEqual((st["ctrl"], st["alt"], st["sym"]), ("off", "off", 1))
 
+    def _hold(self, key, secs):
+        self.t += 0.6
+        out = self.e.key_down(key, self.t)
+        out += self.e.tick(self.t + secs)
+        out += self.e.key_up(key, self.t + secs + 0.01)
+        self.t += secs + 0.02
+        return out
+
+    def test_long_press_alt_replaces_letter(self):
+        out = self._hold("Q", 0.4)                  # держу Q → 0 (alt-слой Titan 2)
+        self.assertEqual(out, [Commit("q"), Delete(1), Commit("0")])
+        self.assertEqual(self._hold("Q", 0.1), [Commit("q")])     # короткое — просто буква
+
+    def test_long_press_modes(self):
+        from titan_keyboard.config import Config
+        e = Engine(cfg=Config(long_press="shift"))
+        self.assertEqual(e.key_down("A", 1.0) + e.tick(1.5), [Commit("a"), Delete(1), Commit("A")])
+        e = Engine(cfg=Config(long_press="variations"), variation_of=lambda ch: {"e": "è"}.get(ch))
+        self.assertEqual(e.key_down("E", 1.0) + e.tick(1.5), [Commit("e"), Delete(1), Commit("è")])
+        e = Engine(cfg=Config(long_press="off"))
+        self.assertEqual(e.key_down("Q", 1.0) + e.tick(1.5), [Commit("q")])
+
+    def test_config_layouts_and_timing(self):
+        from titan_keyboard.config import Config
+        e = Engine(cfg=Config(layouts=["russian_standard", "qwerty"], multitap_ms=200))
+        self.assertEqual(e.layout, "russian_standard")
+        self.assertEqual(e.multitap_s, 0.2)
+
     def test_non_text_keys_pass_through(self):
         self.assertEqual(self.tap("ENTER"), [Key("ENTER")])
         self.assertEqual(self.tap("BKSP"), [Key("BKSP")])

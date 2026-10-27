@@ -43,6 +43,7 @@ class ClipboardWatcher:
         GLib.io_add_watch(self.proc.stdout.fileno(), GLib.IO_IN | GLib.IO_HUP, self._readable)
 
     def _readable(self, fd, cond):
+        from gi.repository import GLib   # как в __init__: модуль проверяется и без PyGObject
         data = self.proc.stdout.read1(65536) if cond & GLib.IO_IN else b""
         if not data:
             return False

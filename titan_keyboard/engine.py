@@ -12,7 +12,10 @@ https://github.com/djbclark/plektra-djbclark):
 - sym листает страницы: эмодзи → символы → обычный ввод; модификатор
   закрывает страницу (KeyboardThemePreview.kt, previewNextSymPageValue);
 - мульти-тап: повтор той же клавиши быстро заменяет символ следующим из
-  `taps` раскладки (inputmethod/MultiTapController.kt).
+  `taps` раскладки (inputmethod/MultiTapController.kt);
+- долгое нажатие: символ ставится сразу, а если клавиша держится дольше
+  порога — заменяется alt-символом, заглавной, первой вариацией или символом
+  sym (inputmethod/AlternateCharacterManager.kt, scheduleLongPress).
 
 Данные — в data/plektra в форматах Plektra.
 """
@@ -70,7 +73,8 @@ def _keycode(name):
 class Modifier:
     """Модификатор в стиле Plektra: одноразовый, зафиксированный или удерживаемый."""
 
-    def __init__(self):
+    def __init__(self, double_tap=DOUBLE_TAP_S):
+        self.double_tap = double_tap
         self.one_shot = False
         self.latched = False
         self.pressed = False
@@ -87,7 +91,7 @@ class Modifier:
         if self.latched:
             self.latched = False
             self._skip_toggle = True
-        elif self.one_shot and t - self.last_release < DOUBLE_TAP_S:
+        elif self.one_shot and t - self.last_release < self.double_tap:
             self.one_shot = False
             self.latched = True
             self._skip_toggle = True
@@ -126,16 +130,24 @@ class Engine:
     SYM_PAGES = ["sym_key_mappings.json", "sym_key_mappings_page2.json"]   # эмодзи, символы
     CLIPBOARD_PAGE = 3       # после страниц sym — буфер обмена (Plektra PAGE_CLIPBOARD)
 
-    def __init__(self, device="titan2", layouts=None, data=DATA):
+    def __init__(self, device="titan2", layouts=None, data=DATA, cfg=None, variation_of=None):
+        if cfg is not None:
+            layouts = cfg.layouts
         self.layouts = {n: _load(f"{data}/layouts/{n}.json") for n in (layouts or self.LAYOUTS)}
+        dt = cfg.double_tap_ms / 1000 if cfg else DOUBLE_TAP_S
+        self.multitap_s = cfg.multitap_ms / 1000 if cfg else MULTITAP_S
+        self.long_press = cfg.long_press if cfg else "alt"
+        self.long_press_s = cfg.long_press_ms / 1000 if cfg else 0.3
+        self.variation_of = variation_of or (lambda ch: None)   # символ → первая вариация
+        self._press = {}               # буква → [время, вставленное, заглавная, сработало]
         self.order = list(self.layouts)
         self.layout = self.order[0]
         self.alt_map = _load(f"{data}/devices/{device}/device_sym_key_mappings.json")
         self.sym_maps = [_load(f"{data}/sym/{p}") for p in self.SYM_PAGES]
         self.ctrl_map = _load(f"{data}/ctrl/ctrl_key_mappings.json")
-        self.shift = Modifier()
-        self.alt = Modifier()
-        self.ctrl = Modifier()         # fn на Titan 2, как в Plektra
+        self.shift = Modifier(dt)
+        self.alt = Modifier(dt)
+        self.ctrl = Modifier(dt)       # fn на Titan 2, как в Plektra
         self.sym_page = 0              # 0 — обычный ввод
         self._multi = None             # (клавиша, индекс тапа, время, длина вставленного, заглавная)
 
@@ -181,7 +193,35 @@ class Engine:
         self._multi = None
         return [Key(key)]
 
+    def tick(self, t):
+        """Долгое нажатие: заменить уже вставленную букву, пока клавиша держится."""
+        out = []
+        for key, p in self._press.items():
+            t0, inserted, upper, fired = p
+            if fired or t - t0 < self.long_press_s or self.long_press == "off":
+                continue
+            p[3] = True
+            ch = self._long_press_char(key, inserted, upper)
+            if ch and ch != inserted:
+                self._multi = None
+                out += [Delete(len(inserted)), Commit(ch)]
+        return out
+
+    def _long_press_char(self, key, inserted, upper):
+        kc = _keycode(key)
+        if self.long_press == "alt":
+            return self.alt_map.get(kc)
+        if self.long_press == "shift":
+            spec = self.layouts[self.layout].get(kc)
+            return spec and spec["uppercase"]
+        if self.long_press == "variations":
+            return self.variation_of(inserted)
+        if self.long_press == "sym":
+            return self.sym_maps[1].get(kc)         # страница символов
+        return None
+
     def key_up(self, key, t):
+        self._press.pop(key, None)
         if key == "SHIFT":
             self.shift.up(t)
         elif key == "ALT":
@@ -221,7 +261,7 @@ class Engine:
         upper = self.shift.active
         taps = spec.get("taps") if spec.get("multiTapEnabled") else None
         out = []
-        if taps and self._multi and self._multi[0] == key and t - self._multi[2] < MULTITAP_S:
+        if taps and self._multi and self._multi[0] == key and t - self._multi[2] < self.multitap_s:
             # повтор той же клавиши — заменить символ следующим вариантом
             idx = (self._multi[1] + 1) % len(taps)
             upper = self._multi[4]       # регистр как у первого нажатия
@@ -232,6 +272,7 @@ class Engine:
             return out
         ch = spec["uppercase" if upper else "lowercase"]
         self._multi = (key, 0, t, len(ch), upper) if taps else None
+        self._press[key] = [t, ch, upper, False]
         self._after_char()
         out.append(Commit(ch))
         return out
