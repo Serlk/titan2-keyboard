@@ -5,8 +5,9 @@
 клавишу как есть). Поведение повторяет Plektra (GPLv3,
 https://github.com/djbclark/plektra-djbclark):
 
-- ⇧ и alt — тап включает на один символ, двойной тап фиксирует, удержание
-  действует, пока держишь (inputmethod/ModifierKeyHandler.kt);
+- ⇧, alt и fn (как Ctrl) — тап включает на один символ, двойной тап
+  фиксирует, удержание действует, пока держишь (inputmethod/ModifierKeyHandler.kt);
+- Ctrl-слой: навигация и правка с букв (assets/common/ctrl/ctrl_key_mappings.json);
 - alt — слой символов устройства (assets/devices/titan2/device_sym_key_mappings.json);
 - sym листает страницы: эмодзи → символы → обычный ввод; модификатор
   закрывает страницу (KeyboardThemePreview.kt, previewNextSymPageValue);
@@ -39,6 +40,22 @@ class Delete:
 class Key:
     """Клавиша без текстового смысла: передать программе как есть."""
     name: str
+
+
+@dataclass
+class Keys:
+    """Сочетание клавиш evdev, например "ctrl+shift+left"."""
+    combo: str
+
+
+# Ctrl-слой Plektra (Android) → сочетания Linux
+CTRL_KEYCODES = {"ESCAPE": "esc", "DPAD_UP": "up", "DPAD_DOWN": "down", "DPAD_LEFT": "left",
+                 "DPAD_RIGHT": "right", "DPAD_CENTER": "enter", "TAB": "tab", "PAGE_UP": "pageup",
+                 "PAGE_DOWN": "pagedown"}
+CTRL_ACTIONS = {"copy": "ctrl+c", "cut": "ctrl+x", "paste": "ctrl+v", "undo": "ctrl+z", "select_all": "ctrl+a",
+                "expand_selection_left": "shift+left", "expand_selection_right": "shift+right",
+                "expand_selection_word_left": "ctrl+shift+left", "expand_selection_word_right": "ctrl+shift+right",
+                "move_word_left": "ctrl+left", "move_word_right": "ctrl+right"}
 
 
 def _load(path):
@@ -114,15 +131,18 @@ class Engine:
         self.layout = self.order[0]
         self.alt_map = _load(f"{data}/devices/{device}/device_sym_key_mappings.json")
         self.sym_maps = [_load(f"{data}/sym/{p}") for p in self.SYM_PAGES]
+        self.ctrl_map = _load(f"{data}/ctrl/ctrl_key_mappings.json")
         self.shift = Modifier()
         self.alt = Modifier()
+        self.ctrl = Modifier()         # fn на Titan 2, как в Plektra
         self.sym_page = 0              # 0 — обычный ввод
         self._multi = None             # (клавиша, индекс тапа, время, длина вставленного, заглавная)
 
     # ---------------------------------------------------------- состояние для индикаторов
 
     def state(self):
-        return {"layout": self.layout, "shift": self.shift.state, "alt": self.alt.state, "sym": self.sym_page}
+        return {"layout": self.layout, "shift": self.shift.state, "alt": self.alt.state,
+                "ctrl": self.ctrl.state, "sym": self.sym_page}
 
     # ---------------------------------------------------------- события
 
@@ -134,10 +154,15 @@ class Engine:
             self.sym_page = 0
             self.alt.down(t)
             return []
+        if key == "FN":
+            self.sym_page = 0
+            self.ctrl.down(t)
+            return []
         if key == "SYM":
             self.sym_page = (self.sym_page + 1) % (len(self.sym_maps) + 1)
             self.shift.reset()
             self.alt.reset()
+            self.ctrl.reset()
             self._multi = None
             return []
         if key == "SPACE" and self.shift.pressed:
@@ -160,12 +185,23 @@ class Engine:
             self.shift.up(t)
         elif key == "ALT":
             self.alt.up(t)
+        elif key == "FN":
+            self.ctrl.up(t)
         return []
 
     # ---------------------------------------------------------- буквы
 
     def _letter(self, key, t):
         kc = _keycode(key)
+        if self.ctrl.active:
+            self.ctrl.use()
+            self._multi = None
+            spec = self.ctrl_map.get(kc, {})
+            if spec.get("type") == "keycode" and spec["keycode"] in CTRL_KEYCODES:
+                return [Keys(CTRL_KEYCODES[spec["keycode"]])]
+            if spec.get("type") == "action" and spec["action"] in CTRL_ACTIONS:
+                return [Keys(CTRL_ACTIONS[spec["action"]])]
+            return [Keys("ctrl+" + key.lower())]      # нет в слое — обычный Ctrl+буква
         if self.sym_page:
             ch = self.sym_maps[self.sym_page - 1].get(kc)
             self._multi = None

@@ -30,14 +30,20 @@ from gi.repository import GLib
 
 from titan_device import keymaps
 
-from .engine import Commit, Delete, Engine, Key
+from .bar import LedBar
+from .engine import Commit, Delete, Engine, Key, Keys
 from .ime import InputMethod
 
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 SOCK = os.path.join(RUN, "titan-keyboard.sock")
 SHELL_SOCK = os.path.join(RUN, "titan-shell.sock")
 
-ENGINE_KEYS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ") | {"SPACE", "SHIFT", "ALT", "SYM"}
+ENGINE_KEYS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ") | {"SPACE", "SHIFT", "ALT", "SYM", "FN"}
+COMBO = {"ctrl": E.KEY_LEFTCTRL, "shift": E.KEY_LEFTSHIFT, "alt": E.KEY_LEFTALT, "esc": E.KEY_ESC,
+         "enter": E.KEY_ENTER, "tab": E.KEY_TAB, "up": E.KEY_UP, "down": E.KEY_DOWN, "left": E.KEY_LEFT,
+         "right": E.KEY_RIGHT, "pageup": E.KEY_PAGEUP, "pagedown": E.KEY_PAGEDOWN, "home": E.KEY_HOME,
+         "end": E.KEY_END, "delete": E.KEY_DELETE}
+COMBO.update({c: getattr(E, f"KEY_{c.upper()}") for c in "abcdefghijklmnopqrstuvwxyz"})
 TEXT_RAW = {"ENTER", "BKSP"}
 CTRL = {E.KEY_LEFTCTRL, E.KEY_RIGHTCTRL}
 
@@ -81,6 +87,11 @@ class Daemon:
         self.ctrl = 0
         self.titan = False
         self.shell = None
+        try:
+            self.bar = LedBar()
+        except Exception as e:          # без layer-shell клавиатура работает и без полосы
+            log("полоса индикаторов недоступна:", e)
+            self.bar = None
         self.ime = InputMethod(self._field)
         if not self.ime.available:
             log("IME занят другим методом ввода: буквы пойдут как обычные клавиши")
@@ -151,6 +162,14 @@ class Daemon:
     def _state_changed(self):
         self.publish(ev="state", **self.engine.state())
         self._shell()
+        self._bar()
+
+    def _bar(self):
+        """Полоса видна, когда открыто поле ввода или включён модификатор."""
+        if self.bar:
+            st = self.engine.state()
+            on = any(st[m] != "off" for m in ("shift", "alt", "ctrl")) or st["sym"]
+            self.bar.update(st, self.titan and (self.ime.state.active or bool(on)))
 
     # ---------------------------------------------------------- поле ввода
 
@@ -161,6 +180,7 @@ class Daemon:
     def _field(self, st):
         self.publish(ev="field", **self._field_info())
         self._shell()
+        self._bar()
 
     # ---------------------------------------------------------- захват
 
@@ -179,8 +199,10 @@ class Daemon:
             self.raw_down.clear()
             self.engine.shift.reset()
             self.engine.alt.reset()
+            self.engine.ctrl.reset()
         log("Titan-ввод", "ВКЛ" if on else "выкл")
         self.publish(ev="titan", on=on)
+        self._bar()
 
     # ---------------------------------------------------------- ввод
 
@@ -276,6 +298,12 @@ class Daemon:
                 code = self.name_to_code.get(a.name)
                 if code:
                     self._tap(code)
+            elif isinstance(a, Keys):
+                codes = [COMBO[p] for p in a.combo.split("+") if p in COMBO]
+                for c in codes:
+                    self._emit(c, 1)
+                for c in reversed(codes):
+                    self._emit(c, 0)
 
     def shutdown(self):
         self.set_titan(False)
