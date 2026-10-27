@@ -15,12 +15,10 @@ from gi.repository import Gtk, Gtk4LayerShell as LS, Pango, PangoCairo  # noqa: 
 
 from titan_device import layout  # noqa: E402
 
+from .theme import C, follow  # noqa: E402
+
 HEIGHT = 132
 TITLES = {1: "эмодзи", 2: "символы"}
-BG = (0.06, 0.065, 0.08, 0.97)
-KEY = (0.14, 0.153, 0.184)
-TEXT = (0.925, 0.933, 0.95)
-MUTED = (0.55, 0.57, 0.62)
 
 # только буквенные ряды: у функционального ряда символов нет
 LETTER_KEYS = [k for k in layout.KEYS if k.row > 0]
@@ -47,6 +45,7 @@ class SymView:
         self.area = Gtk.DrawingArea()
         self.area.set_content_height(HEIGHT)
         self.area.set_draw_func(self._draw)
+        follow(self.area.queue_draw)
         click = Gtk.GestureClick()
         click.connect("released", self._clicked)
         self.area.add_controller(click)
@@ -80,23 +79,23 @@ class SymView:
     def _draw(self, area, cr, w, h):
         if not self.page:
             return
-        cr.set_source_rgba(*BG)
+        cr.set_source_rgba(*C.panel, 0.97)
         cr.rectangle(0, 0, w, h)
         cr.fill()
-        self._text(cr, f"sym · {TITLES.get(self.page, self.page)} · sym ещё раз — дальше", 10, 4, 11, MUTED)
+        self._text(cr, f"sym · {TITLES.get(self.page, self.page)} · sym ещё раз — дальше", 10, 4, 11, C.muted)
         for k, kx, ky, kw, kh in self._geom(w, h):
-            cr.set_source_rgb(*KEY)
+            cr.set_source_rgb(*C.key)
             cr.rectangle(kx + 1.5, ky + 1.5, kw - 3, kh - 3)
             cr.fill()
-            self._text(cr, k.label, kx + 4, ky + 3, 8, MUTED)
+            self._text(cr, k.label, kx + 4, ky + 3, 8, C.muted)
             ch = self.mapping.get("KEYCODE_" + k.name)
             if ch:
-                self._text(cr, ch, kx + kw / 2, ky + kh / 2, 17, TEXT, center=True)
+                self._text(cr, ch, kx + kw / 2, ky + kh / 2, 17, C.text, center=True)
 
     @staticmethod
     def _text(cr, s, x, y, size, color, center=False):
         lay = PangoCairo.create_layout(cr)
-        lay.set_font_description(Pango.FontDescription.from_string(f"DejaVu Sans {size}px"))
+        lay.set_font_description(Pango.FontDescription.from_string(f"{C.font} {size}px"))
         lay.set_text(s, -1)
         tw, th = lay.get_pixel_size()
         if center:

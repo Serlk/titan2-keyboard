@@ -20,6 +20,8 @@ gi.require_version("Gtk4LayerShell", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gdk, Gtk, Gtk4LayerShell as LS, Pango, PangoCairo  # noqa: E402
 
+from .theme import C, follow  # noqa: E402
+
 LED_HEIGHT = 5.5
 LED_RADIUS = 3.0
 BOTTOM_GAP = 1.5          # зазор до нижнего края
@@ -28,10 +30,8 @@ BOTTOM_GAP = 1.5          # зазор до нижнего края
 SEGMENTS = [("shift", 0.000, 0.164), ("sym", 0.168, 0.164), ("ctrl", 0.672, 0.164), ("alt", 0.840, 0.160)]
 
 OFF = (17 / 255, 17 / 255, 17 / 255, 100 / 255)
-ACTIVE = (100 / 255, 150 / 255, 255 / 255, 1.0)
-LOCKED = (247 / 255, 99 / 255, 0 / 255, 1.0)
-# выключенный сегмент на тёмной панели почти не виден — даём ему светлую обводку
-OFF_OUTLINE = (1, 1, 1, 0.10)
+LOCKED = (247 / 255, 99 / 255, 0 / 255, 1.0)   # оранжевый «зафиксирован» — как в Plektra, в любой теме
+ACTIVE = "accent"                              # включён — акцент темы (в тёмной — синий Plektra)
 
 
 def _color(name, state):
@@ -74,6 +74,7 @@ class LedBar:
         self.area = Gtk.DrawingArea()
         self.area.set_content_height(h)
         self.area.set_draw_func(self._draw)
+        follow(self.area.queue_draw)
         self.win.set_child(self.area)
         self.win.connect("realize", lambda w: w.get_surface().set_input_region(cairo.Region()))
         self.win.present()
@@ -89,10 +90,11 @@ class LedBar:
         for name, x, sw in SEGMENTS:
             c = _color(name, self.state)
             _rrect(cr, x * w, y, sw * w, LED_HEIGHT, LED_RADIUS)
-            cr.set_source_rgba(*c)
+            cr.set_source_rgba(*((*C.accent, 1.0) if c == ACTIVE else c))
             if c is OFF:
                 cr.fill_preserve()
-                cr.set_source_rgba(*OFF_OUTLINE)
+                # выключенный сегмент почти не виден на панели — даём ему обводку
+                cr.set_source_rgba(*C.line, 0.10 if C.dark else 0.25)
                 cr.set_line_width(1)
                 cr.stroke()
             else:
@@ -100,10 +102,6 @@ class LedBar:
 
 
 BAR_HEIGHT = 30
-BAR_BG = (0.06, 0.065, 0.08)
-BAR_TEXT = (0.925, 0.933, 0.95)
-BAR_MUTED = (0.55, 0.57, 0.62)
-BAR_SEP = (1, 1, 1, 0.08)
 
 
 class ItemsBar:
@@ -130,6 +128,7 @@ class ItemsBar:
         self.area = Gtk.DrawingArea()
         self.area.set_content_height(BAR_HEIGHT)
         self.area.set_draw_func(self._draw)
+        follow(self.area.queue_draw)
         click = Gtk.GestureClick()
         click.connect("released", self._clicked)
         self.area.add_controller(click)
@@ -154,7 +153,7 @@ class ItemsBar:
             self.on_pick(min(len(self.items) - 1, int(x / w * len(self.items))))
 
     def _draw(self, area, cr, w, h):
-        cr.set_source_rgb(*BAR_BG)
+        cr.set_source_rgb(*C.panel)
         cr.paint()
         n = len(self.items)
         if not n:
@@ -162,15 +161,15 @@ class ItemsBar:
         cw = w / n
         for i, (label, quiet) in enumerate(self.items):
             if i:
-                cr.set_source_rgba(*BAR_SEP)
+                cr.set_source_rgba(*C.line, 0.08)
                 cr.rectangle(i * cw, 6, 1, h - 12)
                 cr.fill()
-            self._text(cr, label, i * cw + cw / 2, h / 2, cw - 8, BAR_MUTED if quiet else BAR_TEXT)
+            self._text(cr, label, i * cw + cw / 2, h / 2, cw - 8, C.muted if quiet else C.text)
 
     @staticmethod
     def _text(cr, s, cx, cy, maxw, color):
         lay = PangoCairo.create_layout(cr)
-        lay.set_font_description(Pango.FontDescription.from_string("DejaVu Sans 15px"))
+        lay.set_font_description(Pango.FontDescription.from_string(f"{C.font} 15px"))
         lay.set_text(s, -1)
         lay.set_width(int(maxw * Pango.SCALE))
         lay.set_ellipsize(Pango.EllipsizeMode.END)

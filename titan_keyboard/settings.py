@@ -364,8 +364,17 @@ class Settings(Adw.ApplicationWindow):
 
 def main():
     app = Adw.Application(application_id=APP_ID)
-    app.connect("activate", lambda a: Settings(a).present())
+    app.connect("activate", _activate)
     app.run([])
+
+
+def _activate(app):
+    try:
+        from titan_theme.adw import follow   # тема Titan, если titan-theme установлен
+        follow()
+    except ImportError:
+        pass
+    Settings(app).present()
 
 
 if __name__ == "__main__":
