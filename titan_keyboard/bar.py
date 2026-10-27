@@ -36,7 +36,7 @@ OFF_OUTLINE = (1, 1, 1, 0.10)
 
 def _color(name, state):
     if name == "sym":
-        return {1: ACTIVE, 2: LOCKED}.get(state.get("sym", 0), OFF)
+        return {1: ACTIVE, 2: LOCKED, 3: ACTIVE}.get(state.get("sym", 0), OFF)
     v = state.get(name, "off")
     return LOCKED if v == "lock" else ACTIVE if v == "on" else OFF
 

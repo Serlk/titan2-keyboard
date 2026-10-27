@@ -30,11 +30,17 @@ from gi.repository import GLib
 
 from titan_device import keymaps
 
+from .autocorrect import AutoCorrector, policy, should_capitalize
 from .bar import ItemsBar, LedBar
+from .clipboard import ClipboardWatcher, History
 from .engine import Commit, Delete, Engine, Key, Keys
 from .expansion import Expander, shortcode_query
 from .ime import InputMethod
 from .variations import Variations
+from .words import Suggester, current_word
+
+# после чего слово закончено: учим его и проверяем автокоррекцию
+WORD_END = set(" .,!?;:")
 
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 SOCK = os.path.join(RUN, "titan-keyboard.sock")
@@ -91,6 +97,9 @@ class Daemon:
         self.shell = None
         self.expander = Expander()
         self.variations = Variations()
+        self.suggester = Suggester()
+        self.corrector = AutoCorrector()
+        self.clipboard = History()
         self.entries = []               # пункты полосы: (подпись, приглушённо, действие)
         try:
             self.bar = LedBar()
@@ -102,6 +111,7 @@ class Daemon:
         if not self.ime.available:
             log("IME занят другим методом ввода: буквы пойдут как обычные клавиши")
         self.ime.attach()
+        self.clip_watch = ClipboardWatcher(self.clipboard, self._refresh_items)
         self._listen()
         GLib.io_add_watch(self.kbd.fd, GLib.IO_IN, self._kbd_events)
         log("клавиатура:", self.kbd.name, "| профиль:", "Titan 2" if self.on_device else "ноутбук")
@@ -217,11 +227,25 @@ class Daemon:
         st = self.ime.state
         entries = []
         if self.titan and st.active and self.ime.available:
-            before = st.before_cursor
+            before = self.ime.before
+            pol = self._policy()
+            word, prev = current_word(before)
             q = self.expander.query(before)
-            if q:
+            if self.engine.sym_page == self.engine.CLIPBOARD_PAGE:
+                for text in self.clipboard.items[:5]:
+                    entries.append((text.splitlines()[0][:40] if text.strip() else "⏎", False, ("insert", "", text)))
+                if not entries:
+                    entries.append(("буфер пуст", True, ("insert", "", "")))
+            elif q:
                 for m in self.expander.matches(q, 6):
                     entries.append((m.display, False, ("expand", q.token, m.replacement)))
+            elif pol["suggest"] and word:
+                # пока набирается слово — до 3 подсказок (выбор броском в трети сенсора)
+                for w in self.suggester.suggest(word):
+                    entries.append((w, False, ("suggest", word, w + " ")))
+            elif pol["suggest"] and prev and before.endswith(" "):
+                for w in self.suggester.predict(prev):
+                    entries.append((w, False, ("suggest", "", w + " ")))
             if not entries:
                 es = self.engine.state()
                 for it in self.variations.items(before, st.purpose, self.engine.layout,
@@ -238,14 +262,47 @@ class Daemon:
         if not (0 <= i < len(self.entries)):
             return
         _, _, (kind, old, new) = self.entries[i]
+        if not new:
+            return
+        if kind == "suggest" and self._policy()["learn"]:
+            self.suggester.learned.learn(new.strip(), current_word(self.ime.before)[1])
         if old:
             self.ime.delete_string(old)
         self.ime.commit_string(new)
+        self.corrector.accept()
         log("полоса:", kind, repr(old), "→", repr(new))
+
+    def _policy(self):
+        st = self.ime.state
+        return policy(st.purpose, st.hint, st.private)
+
+    def _maybe_autocap(self):
+        """Заглавная в начале поля и предложения (Plektra smart shift)."""
+        e = self.engine
+        if self._policy()["autocap"] and e.shift.state == "off" and not e.sym_page \
+                and not e.alt.active and not e.ctrl.active and should_capitalize(self.ime.before):
+            e.shift.one_shot = True
+
+    def _word_end(self, sep):
+        """Слово закончено разделителем: автокоррекция, затем обучение. True — разделитель уже вставлен."""
+        before = self.ime.before
+        word, prev = current_word(before)
+        if not word or self.expander.query(before):
+            return False                  # !сниппет или :шорткод — не слово
+        pol = self._policy()
+        fix = self.corrector.correct(word) if pol["autocorrect"] else None
+        if fix:
+            self.ime.delete_string(word)
+            self.ime.commit_string(fix + sep)
+            self.corrector.record(word, fix, sep)
+            log("автокоррекция:", repr(word), "→", repr(fix))
+        if pol["learn"]:
+            self.suggester.learned.learn(fix or word, prev)
+        return bool(fix)
 
     def _expand_on_space(self):
         """Пробел после точного сниппета или шорткода раскрывает его."""
-        q = self.expander.query(self.ime.state.before_cursor)
+        q = self.expander.query(self.ime.before)
         m = q and self.expander.exact(q)
         if not m:
             return False
@@ -255,7 +312,7 @@ class Daemon:
 
     def _close_shortcode(self):
         """Закрывающее «:» сразу превращает :имя: в эмодзи или символ."""
-        before = self.ime.state.before_cursor
+        before = self.ime.before
         q = shortcode_query(before + ":")
         m = q and q.closed and self.expander.exact(q)
         if not m:
@@ -344,7 +401,20 @@ class Daemon:
             self.publish(ev="key", code=code, key=name, v=value, t=t, consumed=True)
             return
 
+        # ⌫ сразу после автокоррекции возвращает исходное слово (Plektra AutoCorrector.undo)
+        if field and name == "BKSP" and value == 1 and self.corrector.last:
+            remove, restore = self.corrector.undo()
+            self.ime.delete_string(remove)
+            self.ime.commit_string(restore)
+            self.suggester.learned.learn(restore.strip())
+            self.publish(ev="key", code=code, key=name, v=value, t=t, consumed=True)
+            return
+        if value == 1 and name not in ("SHIFT", "ALT", "FN", "SYM"):
+            self.corrector.accept()
+
         if field and name in ENGINE_KEYS:
+            if value == 1 and len(name) == 1:
+                self._maybe_autocap()
             before = self.engine.state()
             actions = self.engine.key_down(name, t) if value else self.engine.key_up(name, t)
             self._apply(actions)
@@ -376,6 +446,8 @@ class Daemon:
                 continue
             if isinstance(a, Commit) and a.text == ":" and self._close_shortcode():
                 continue
+            if isinstance(a, Commit) and a.text in WORD_END and self._word_end(a.text):
+                continue
             if isinstance(a, Commit):
                 if not self.ime.commit_string(a.text):
                     log("поле ввода пропало, символ не вставлен:", a.text)
@@ -394,6 +466,7 @@ class Daemon:
 
     def shutdown(self):
         self.set_titan(False)
+        self.clip_watch.stop()
 
 
 def main():

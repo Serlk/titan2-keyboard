@@ -54,6 +54,7 @@ class TestEngine(unittest.TestCase):
     def test_sym_pages(self):
         self.assertEqual(self.text(["SYM", "Q"]), "😀")          # страница эмодзи
         self.assertEqual(self.text(["SYM", "Q"]), "~")           # страница символов
+        self.assertEqual(self.text(["SYM", "Q"]), "")            # страница буфера: буквы не печатают
         self.assertEqual(self.text(["SYM", "Q"]), "q")           # обычный ввод
 
     def test_layout_switch_and_multitap(self):

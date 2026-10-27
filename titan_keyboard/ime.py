@@ -59,6 +59,9 @@ class InputMethod:
     def __init__(self, on_change=lambda state: None):
         self.state = FieldState()
         self.on_change = on_change
+        # наши правки, которые программа ещё не подтвердила новым surrounding_text
+        self._pend_add = ""
+        self._pend_del = 0
         self.available = True
         self._pending = _Pending()
         self.display = Display()
@@ -107,10 +110,12 @@ class InputMethod:
         s.serial += 1
         if p.active is True:
             s.active, s.text, s.cursor, s.anchor, s.hint, s.purpose = True, "", 0, 0, 0, 0
+            self._pend_add, self._pend_del = "", 0
         elif p.active is False:
             s.active = False
         if p.text:
             s.text, s.cursor, s.anchor = p.text
+            self._pend_add, self._pend_del = "", 0
         if p.content:
             s.hint, s.purpose = p.content
         self._pending = _Pending()
@@ -122,6 +127,21 @@ class InputMethod:
         self.state.active = False
         self.on_change(self.state)
 
+    @property
+    def before(self):
+        """Текст до курсора с учётом наших ещё не подтверждённых вставок и удалений."""
+        base = self.state.before_cursor
+        if self._pend_del:
+            base = base[: max(0, len(base) - self._pend_del)]
+        return base + self._pend_add
+
+    def _note_delete(self, n):
+        if len(self._pend_add) >= n:
+            self._pend_add = self._pend_add[: len(self._pend_add) - n]
+        else:
+            self._pend_del += n - len(self._pend_add)
+            self._pend_add = ""
+
     # ---------------------------------------------------------- запросы
 
     def commit_string(self, text):
@@ -130,18 +150,20 @@ class InputMethod:
         self.im.commit_string(text)
         self.im.commit(self.state.serial)
         self.display.flush()
+        self._pend_add += text
         return True
 
     def delete_before(self, chars):
         """Удалить `chars` символов перед курсором (протокол считает байты UTF-8)."""
         if not self.state.active or chars <= 0:
             return False
-        before = self.state.before_cursor
+        before = self.before
         tail = before[-chars:] if before else ""
         nbytes = len(tail.encode()) if len(tail) == chars else chars
         self.im.delete_surrounding_text(nbytes, 0)
         self.im.commit(self.state.serial)
         self.display.flush()
+        self._note_delete(chars)
         return True
 
     def delete_string(self, text):
@@ -151,6 +173,7 @@ class InputMethod:
         self.im.delete_surrounding_text(len(text.encode()), 0)
         self.im.commit(self.state.serial)
         self.display.flush()
+        self._note_delete(len(text))
         return True
 
     def preedit(self, text, cursor=None):

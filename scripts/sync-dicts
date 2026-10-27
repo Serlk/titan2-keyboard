@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Словари Plektra → компактные списки «слово<TAB>частота» для titan-keyboard.
+
+    scripts/sync-dicts /путь/к/клону/plektra  [каталог-с-скачанными-.dict]
+
+Источник — `*_base.dict` Plektra (CBOR, поле normalizedIndex: нормализованное
+слово → [{word, frequency, source}]). en берётся из клона Plektra
+(assets/common/dictionaries_serialized), ru — из релиза pkb-rocks/plektra-dict
+(скачивается, проверяется sha256 по dictionary_catalog.json).
+
+Данные — производные частотных списков Leipzig Corpora Collection (CC-BY 3.0),
+репозиторий plektra-dict — GPLv3; лицензии и указание авторства кладутся рядом
+(data/dict/NOTICE.md).
+"""
+
+import gzip
+import hashlib
+import json
+import os
+import struct
+import sys
+import urllib.request
+
+LANGS = ["en", "ru"]
+MAX_WORDS = 120_000          # компромисс размер/полнота; самые частые слова
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DST = os.path.join(HERE, "data", "dict")
+
+
+def cbor(buf, i=0):
+    """Минимальный декодер CBOR (то, что встречается в .dict Plektra)."""
+    b = buf[i]
+    major, info = b >> 5, b & 31
+    i += 1
+    if info < 24:
+        n = info
+    elif info == 24:
+        n = buf[i]; i += 1
+    elif info == 25:
+        n = struct.unpack_from(">H", buf, i)[0]; i += 2
+    elif info == 26:
+        n = struct.unpack_from(">I", buf, i)[0]; i += 4
+    elif info == 27:
+        n = struct.unpack_from(">Q", buf, i)[0]; i += 8
+    elif info == 31:
+        n = None                                     # неопределённая длина
+    else:
+        raise ValueError(f"CBOR: info {info}")
+    if major == 0:
+        return n, i
+    if major == 1:
+        return -1 - n, i
+    if major in (2, 3):
+        if n is None:
+            raise ValueError("CBOR: строки неопределённой длины не поддержаны")
+        raw = bytes(buf[i:i + n])
+        return (raw.decode() if major == 3 else raw), i + n
+    if major == 4:
+        out = []
+        if n is None:
+            while buf[i] != 0xFF:
+                v, i = cbor(buf, i); out.append(v)
+            return out, i + 1
+        for _ in range(n):
+            v, i = cbor(buf, i); out.append(v)
+        return out, i
+    if major == 5:
+        out = {}
+        if n is None:
+            while buf[i] != 0xFF:
+                k, i = cbor(buf, i); v, i = cbor(buf, i); out[k] = v
+            return out, i + 1
+        for _ in range(n):
+            k, i = cbor(buf, i); v, i = cbor(buf, i); out[k] = v
+        return out, i
+    if major == 7:
+        if info == 20: return False, i
+        if info == 21: return True, i
+        if info in (22, 23): return None, i
+        if info == 25: return struct.unpack_from(">e", buf, i - 2)[0], i
+        if info == 26: return struct.unpack_from(">f", buf, i - 4)[0], i
+        if info == 27: return struct.unpack_from(">d", buf, i - 8)[0], i
+    raise ValueError(f"CBOR: major {major}")
+
+
+def words(path):
+    with open(path, "rb") as f:
+        buf = f.read()
+    top, _ = cbor(buf)
+    freq = {}
+    for entries in top["normalizedIndex"].values():
+        for e in entries:
+            w, fr = e["word"], int(e["frequency"])
+            if fr > freq.get(w, -1):
+                freq[w] = fr
+    return sorted(freq.items(), key=lambda kv: -kv[1])
+
+
+def fetch(item, cache):
+    path = os.path.join(cache, item["filename"])
+    if not os.path.exists(path):
+        print("скачиваю", item["url"])
+        urllib.request.urlretrieve(item["url"], path)
+    with open(path, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    if digest != item["sha256"]:
+        sys.exit(f"{path}: sha256 не совпадает с каталогом Plektra")
+    return path
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    src = sys.argv[1]
+    cache = sys.argv[2] if len(sys.argv) > 2 else os.path.join(DST, ".cache")
+    os.makedirs(cache, exist_ok=True)
+    common = os.path.join(src, "app/src/main/assets/common")
+    with open(os.path.join(common, "dictionary_catalog.json")) as f:
+        catalog = {it["id"]: it for it in json.load(f)["items"]}
+    os.makedirs(DST, exist_ok=True)
+    for lang in LANGS:
+        bundled = os.path.join(common, "dictionaries_serialized", f"{lang}_base.dict")
+        path = bundled if os.path.exists(bundled) else fetch(catalog[f"{lang}_base"], cache)
+        ws = words(path)[:MAX_WORDS]
+        with gzip.open(os.path.join(DST, f"{lang}.tsv.gz"), "wt", encoding="utf-8", compresslevel=9) as out:
+            for w, fr in ws:
+                out.write(f"{w}\t{fr}\n")
+        print(f"{lang}: {len(ws)} слов из {os.path.basename(path)}")
+    with open(os.path.join(DST, "NOTICE.md"), "w") as f:
+        f.write(NOTICE)
+    print("готово:", DST)
+
+
+NOTICE = """# Словари titan-keyboard
+
+Списки `*.tsv.gz` («слово<TAB>частота», самые частые слова) получены из базовых словарей
+Plektra (`*_base.dict`): en — из репозитория https://github.com/djbclark/plektra-djbclark
+(assets/common/dictionaries_serialized), ru — из релиза v1 https://github.com/pkb-rocks/plektra-dict
+(GPLv3). Преобразование: декодирование CBOR, выбор самой частой формы слова, обрезка по частоте.
+
+Исходные данные — производные частотных списков Leipzig Corpora Collection / Wortschatz Leipzig
+(https://wortschatz.uni-leipzig.de/), CC-BY 3.0:
+
+D. Goldhahn, T. Eckart, U. Quasthoff: *Building Large Monolingual Dictionaries at the Leipzig Corpora
+Collection: From 100 to 200 Languages*. Proceedings of LREC 2012.
+"""
+
+if __name__ == "__main__":
+    main()

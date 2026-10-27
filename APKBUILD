@@ -6,7 +6,7 @@ pkgdesc="Клавиатура Titan: модификаторы, слои, рас�
 url="https://github.com/"
 arch="noarch"
 license="GPL-3.0-or-later"
-depends="python3 py3-evdev py3-gobject3 py3-pywayland"
+depends="python3 py3-evdev py3-gobject3 py3-pywayland gtk4-layer-shell wl-clipboard"
 options="!check"
 
 package() {

@@ -124,6 +124,7 @@ class Modifier:
 class Engine:
     LAYOUTS = ["qwerty", "russian_standard"]
     SYM_PAGES = ["sym_key_mappings.json", "sym_key_mappings_page2.json"]   # эмодзи, символы
+    CLIPBOARD_PAGE = 3       # после страниц sym — буфер обмена (Plektra PAGE_CLIPBOARD)
 
     def __init__(self, device="titan2", layouts=None, data=DATA):
         self.layouts = {n: _load(f"{data}/layouts/{n}.json") for n in (layouts or self.LAYOUTS)}
@@ -159,7 +160,7 @@ class Engine:
             self.ctrl.down(t)
             return []
         if key == "SYM":
-            self.sym_page = (self.sym_page + 1) % (len(self.sym_maps) + 1)
+            self.sym_page = (self.sym_page + 1) % (len(self.sym_maps) + 2)
             self.shift.reset()
             self.alt.reset()
             self.ctrl.reset()
@@ -202,6 +203,8 @@ class Engine:
             if spec.get("type") == "action" and spec["action"] in CTRL_ACTIONS:
                 return [Keys(CTRL_ACTIONS[spec["action"]])]
             return [Keys("ctrl+" + key.lower())]      # нет в слое — обычный Ctrl+буква
+        if self.sym_page == self.CLIPBOARD_PAGE:
+            return []                    # на странице буфера буквы не печатают — выбор в полосе
         if self.sym_page:
             ch = self.sym_maps[self.sym_page - 1].get(kc)
             self._multi = None
