@@ -14,6 +14,9 @@
     {"ev": "titan", "on": true}      ввод захвачен (на ноутбуке — по F8)
     {"ev": "state", "layout": "qwerty", "shift": "off", "alt": "on", "sym": 0}
 
+Команды подписчика: retract, app, reload, pick_x и {"cmd": "mouse", "on": true} —
+режим мыши titan-gestured: все клавиши уходят ему, ядро набора их не видит.
+
     WAYLAND_DISPLAY=wayland-2 python3 -m titan_keyboard.daemon
 """
 
@@ -103,6 +106,7 @@ class Daemon:
         self._load_config()
         self.t0 = time.monotonic()
         self.subscribers = []
+        self.mouse = False          # режим мыши titan-gestured
         self.raw_down = set()
         self.ctrl = 0
         self.titan = False
@@ -232,6 +236,9 @@ class Daemon:
             elif msg.get("cmd") == "app":
                 self.app_id = msg.get("id") or ""
                 self._update_terminal()
+            elif msg.get("cmd") == "mouse":
+                self.mouse = bool(msg.get("on"))
+                log("режим мыши", "вкл" if self.mouse else "выкл")
             elif msg.get("cmd") == "reload":
                 # программа настроек поменяла файлы: настройки, исправления, выученные слова
                 self._load_config()
@@ -262,6 +269,7 @@ class Daemon:
         if conn in self.subscribers:
             self.subscribers.remove(conn)
             log("подписчик отключился")
+            self.mouse = False
         conn.close()
         return False
 
@@ -517,6 +525,10 @@ class Daemon:
         if ctl == "POWER":
             if value == 1:
                 self.publish(ev="key", code=code, key="POWER", v=1, t=t, consumed=False)
+            return
+        if self.mouse and self.subscribers and code not in self.raw_down:
+            # режим мыши: клавиши — кнопки и сочетания, решает titan-gestured (и автоповтор тоже)
+            self.publish(ev="key", code=code, key=self.keymap.get(code), v=value, t=t, consumed=False)
             return
         if value == 2:
             if code in self.raw_down:
