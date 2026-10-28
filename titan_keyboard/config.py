@@ -38,10 +38,12 @@ autocorrect = true
 autocapitalize = true
 learn = true               # запоминать свои слова для подсказок
 
-# Буфер обмена: история (только в памяти, кроме закреплённого), панель — удержание sym.
+# Буфер обмена: история, панель — удержание sym.
 clipboard_history = true
 clipboard_limit = 30       # сколько записей помнить
 clipboard_days = 0         # забывать незакреплённое через N дней, 0 — не забывать
+clipboard_private_s = 60   # пароли и PIN-коды живут в истории N секунд, 0 — не запоминать
+clipboard_save = true      # хранить историю на диске (0600); false — на диске только закреплённое
 clipboard_paste = true     # выбор в панели сразу вставляет; false — только копирует в буфер
 """
 
@@ -61,6 +63,8 @@ class Config:
     clipboard_history: bool = True
     clipboard_limit: int = 30
     clipboard_days: int = 0
+    clipboard_private_s: int = 60
+    clipboard_save: bool = True
     clipboard_paste: bool = True
     problems: list = field(default_factory=list)
 
@@ -123,6 +127,9 @@ def load(path=CONFIG, available_layouts=None):
     if not 0 <= cfg.clipboard_days <= 365:
         cfg.problems.append("clipboard_days: от 0 до 365")
         cfg.clipboard_days = min(365, max(0, cfg.clipboard_days))
+    if not 0 <= cfg.clipboard_private_s <= 86400:
+        cfg.problems.append("clipboard_private_s: от 0 до 86400")
+        cfg.clipboard_private_s = min(86400, max(0, cfg.clipboard_private_s))
     if available_layouts is not None:
         bad = [x for x in cfg.layouts if x not in available_layouts]
         if bad:

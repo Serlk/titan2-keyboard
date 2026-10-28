@@ -39,7 +39,7 @@ from titan_device import keymaps
 from . import config
 from .autocorrect import AutoCorrector, policy, should_capitalize
 from .bar import ItemsBar, LedBar
-from .clipboard import PINS, ClipboardWatcher, History
+from .clipboard import HISTORY, PINS, ClipboardWatcher, History
 from .engine import DATA, Commit, Delete, Engine, Key, Keys
 from .expansion import Expander, shortcode_query
 from .ime import InputMethod
@@ -118,7 +118,7 @@ class Daemon:
         self.expander = Expander(prefix=self.cfg.snippet_prefix)
         self.suggester = Suggester()
         self.corrector = AutoCorrector()
-        self.clipboard = History(pins_path=PINS)
+        self.clipboard = History(path=HISTORY, legacy_pins=PINS)
         self._clipboard_config()
         self.clip_panel = None
         self.sym_hold = None            # (время, страница sym до нажатия) — удержание sym открывает буфер
@@ -182,7 +182,7 @@ class Daemon:
             self.paste_pending = None
             self._paste_by_keys(text)          # поле так и не вернулось — вставим через буфер
         self._expire_check = getattr(self, "_expire_check", 0) + 1
-        if self._expire_check % 3000 == 0 and self.clipboard.expire():    # раз в минуту
+        if self._expire_check % 250 == 0 and self.clipboard.expire():     # раз в 5 с: пароли живут недолго
             self._clipboard_changed()
         # долгое нажатие
         if self.titan and self.ime.state.active:
@@ -456,7 +456,10 @@ class Daemon:
         self.clipboard.enabled = c.clipboard_history
         self.clipboard.limit = c.clipboard_limit
         self.clipboard.max_age_s = c.clipboard_days * 86400 or None
-        del self.clipboard.entries[self.clipboard.limit:]
+        self.clipboard.private_s = c.clipboard_private_s
+        self.clipboard.save = c.clipboard_save
+        self.clipboard.trim()               # и перезаписать файл: могли выключить хранение на диске
+        self.clipboard.expire()
         if not c.clipboard_history:
             self.clipboard.clear()
 

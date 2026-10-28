@@ -231,7 +231,14 @@ class ClipboardPanel:
         if pinned:
             row.add_css_class("pinned")
         box = Gtk.Box(spacing=6)
-        label = Gtk.Label(label=preview(text), xalign=0, hexpand=True, wrap=True, lines=3,
+        left = self.history.expires_in(text)
+        if left is not None:
+            # пароль: не показываем на экране, только сколько ему осталось
+            shown = _("🔒 password · disappears in {seconds} s").format(seconds=left) if left < 120 else \
+                _("🔒 password · disappears in {minutes} min").format(minutes=round(left / 60))
+        else:
+            shown = preview(text)
+        label = Gtk.Label(label=shown, xalign=0, hexpand=True, wrap=True, lines=3,
                           ellipsize=Pango.EllipsizeMode.END, wrap_mode=Pango.WrapMode.WORD_CHAR)
         box.append(label)
         tap = Gtk.GestureClick()

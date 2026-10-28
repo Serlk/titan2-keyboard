@@ -25,7 +25,7 @@ class TestHistory(unittest.TestCase):
         self.tmp.cleanup()
 
     def h(self, **kw):
-        return History(pins_path=self.pins, clock=self.clock, **kw)
+        return History(path=self.pins, clock=self.clock, **kw)
 
     def test_newest_first_and_dedup(self):
         h = self.h()
@@ -39,11 +39,49 @@ class TestHistory(unittest.TestCase):
             h.add(t)
         self.assertEqual(h.items, ["e", "d", "c"])
 
-    def test_blank_and_private_skipped(self):
+    def test_blank_skipped(self):
         h = self.h()
         self.assertFalse(h.add("  \n"))
+        self.assertEqual(h.items, [])
+
+    def test_password_lives_private_s(self):
+        h = self.h(private_s=60)
+        self.assertTrue(h.add("secret", private=True))
+        h.add("plain")
+        self.assertTrue(h.is_private("secret"))
+        self.assertEqual(h.expires_in("secret"), 60)
+        self.clock.t += 59
+        self.assertFalse(h.expire())
+        self.clock.t += 2
+        self.assertTrue(h.expire())
+        self.assertEqual(h.items, ["plain"])
+        self.assertEqual(self.h(private_s=60).items, ["plain"])     # и с диска пароль ушёл
+
+    def test_password_not_remembered_when_zero(self):
+        h = self.h(private_s=0)
         self.assertFalse(h.add("secret", private=True))
         self.assertEqual(h.items, [])
+
+    def test_history_on_disk(self):
+        h = self.h()
+        h.add("a")
+        h.add("b")
+        self.assertEqual(self.h().items, ["b", "a"])
+        self.assertEqual(stat.S_IMODE(os.stat(self.pins).st_mode), 0o600)
+
+    def test_save_off_keeps_only_pins(self):
+        h = self.h(save=False)
+        h.add("a")
+        h.add("p")
+        h.pin("p")
+        self.assertEqual(self.h().items, ["p"])
+
+    def test_legacy_pins_file(self):
+        old = os.path.join(self.tmp.name, "old-pins.json")
+        with open(old, "w") as f:
+            f.write('["keep"]')
+        h = History(path=self.pins, clock=self.clock, legacy_pins=old)
+        self.assertEqual(h.items, ["keep"])
 
     def test_disabled(self):
         h = self.h()
@@ -59,7 +97,7 @@ class TestHistory(unittest.TestCase):
         self.assertEqual(h.items, ["keep", "c", "b"])
         h.clear()
         self.assertEqual(h.items, ["keep"])
-        self.assertEqual(self.h().items, ["keep"])          # закреплённое — на диске
+        self.assertEqual(self.h().items, ["keep"])          # после очистки на диске — закреплённое
         self.assertEqual(stat.S_IMODE(os.stat(self.pins).st_mode), 0o600)
         h.add("keep")                                        # повтор закреплённого не дублирует
         self.assertEqual(h.items, ["keep"])

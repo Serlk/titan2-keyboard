@@ -10,3 +10,5 @@ Pin	Закрепить
 Delete	Удалить
 Clearing in {seconds} s	Очистка через {seconds} с
 titan-keyboard is not running: {error}	titan-keyboard не запущен: {error}
+🔒 password · disappears in {seconds} s	🔒 пароль · исчезнет через {seconds} с
+🔒 password · disappears in {minutes} min	🔒 пароль · исчезнет через {minutes} мин

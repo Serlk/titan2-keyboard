@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: titan-keyboard\n"
 "Report-Msgid-Bugs-To: https://github.com/\n"
-"POT-Creation-Date: 2026-10-28 18:49+0300\n"
+"POT-Creation-Date: 2026-10-28 18:55+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -50,19 +50,29 @@ msgstr ""
 msgid "The clipboard is empty — copy something"
 msgstr ""
 
-#: titan_keyboard/clipboard_panel.py:241
+#: titan_keyboard/clipboard_panel.py:237
+#, python-brace-format
+msgid "🔒 password · disappears in {seconds} s"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:238
+#, python-brace-format
+msgid "🔒 password · disappears in {minutes} min"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:248
 msgid "Unpin"
 msgstr ""
 
-#: titan_keyboard/clipboard_panel.py:241
+#: titan_keyboard/clipboard_panel.py:248
 msgid "Pin"
 msgstr ""
 
-#: titan_keyboard/clipboard_panel.py:246
+#: titan_keyboard/clipboard_panel.py:253
 msgid "Delete"
 msgstr ""
 
-#: titan_keyboard/clipboard_panel.py:271 titan_keyboard/clipboard_panel.py:281
+#: titan_keyboard/clipboard_panel.py:278 titan_keyboard/clipboard_panel.py:288
 #, python-brace-format
 msgid "Clearing in {seconds} s"
 msgstr ""
