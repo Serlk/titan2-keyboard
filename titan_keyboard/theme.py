@@ -8,13 +8,16 @@ from types import SimpleNamespace
 
 try:
     import titan_theme
+    from titan_theme import effects as titan_effects
 except ImportError:
-    titan_theme = None
+    titan_theme = titan_effects = None
 
 C = SimpleNamespace(
     panel=(0.06, 0.065, 0.08), key=(0.14, 0.153, 0.184), text=(0.925, 0.933, 0.95),
     muted=(0.55, 0.57, 0.62), accent=(100 / 255, 150 / 255, 1.0), line=(1, 1, 1),
-    font="DejaVu Sans", dark=True)
+    font="DejaVu Sans", dark=True,
+    # «стекло»: niri размывает фон полос (titan_theme/effects.py) — тогда фон полупрозрачный
+    blur=False, glass=1.0)
 
 _listeners = []
 
@@ -25,6 +28,8 @@ def _apply(t):
     C.key, C.text, C.muted, C.accent = t.surface2, t.text, t.muted, t.accent
     C.line = (1, 1, 1) if t.dark else (0, 0, 0)
     C.font, C.dark = t.font, t.dark
+    C.blur = bool(getattr(t, "effects", False)) and titan_effects is not None and titan_effects.supported()
+    C.glass = titan_theme.surface_alpha(t) if C.blur else 1.0
     for redraw in _listeners:
         redraw()
 

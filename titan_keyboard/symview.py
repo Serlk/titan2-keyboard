@@ -13,8 +13,11 @@ gi.require_version("Gtk4LayerShell", "1.0")
 gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Gtk4LayerShell as LS, Pango, PangoCairo  # noqa: E402
 
+import cairo  # noqa: E402
+
 from titan_device import layout  # noqa: E402
 
+from .bar import _rrect  # noqa: E402
 from .theme import C, follow  # noqa: E402
 
 HEIGHT = 132
@@ -23,6 +26,10 @@ TITLES = {1: "эмодзи", 2: "символы"}
 # только буквенные ряды: у функционального ряда символов нет
 LETTER_KEYS = [k for k in layout.KEYS if k.row > 0]
 ROWS = len(layout.ROWS) - 1
+
+
+def ch_of(mapping, k):
+    return mapping.get("KEYCODE_" + k.name)
 
 
 class SymView:
@@ -79,13 +86,20 @@ class SymView:
     def _draw(self, area, cr, w, h):
         if not self.page:
             return
-        cr.set_source_rgba(*C.panel, 0.97)
-        cr.rectangle(0, 0, w, h)
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(*C.panel, C.glass if C.blur else 0.97)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_rgba(*C.line, 0.09 if C.blur else 0.06)
+        cr.rectangle(0, 0, w, 1)
         cr.fill()
         self._text(cr, f"sym · {TITLES.get(self.page, self.page)} · sym ещё раз — дальше", 10, 4, 11, C.muted)
         for k, kx, ky, kw, kh in self._geom(w, h):
-            cr.set_source_rgb(*C.key)
-            cr.rectangle(kx + 1.5, ky + 1.5, kw - 3, kh - 3)
+            _rrect(cr, kx + 2, ky + 2, kw - 4, kh - 4, 7)
+            if C.blur:
+                cr.set_source_rgba(*C.line, 0.08 if ch_of(self.mapping, k) else 0.03)
+            else:
+                cr.set_source_rgb(*C.key)
             cr.fill()
             self._text(cr, k.label, kx + 4, ky + 3, 8, C.muted)
             ch = self.mapping.get("KEYCODE_" + k.name)

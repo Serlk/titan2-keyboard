@@ -153,18 +153,24 @@ class ItemsBar:
             self.on_pick(min(len(self.items) - 1, int(x / w * len(self.items))))
 
     def _draw(self, area, cr, w, h):
-        cr.set_source_rgb(*C.panel)
+        # на стекле — полупрозрачная панель поверх размытого окна; без размытия — сплошная
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(*C.panel, C.glass)
         cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_rgba(*C.line, 0.09 if C.blur else 0.06)      # тонкий блик по верхнему краю
+        cr.rectangle(0, 0, w, 1)
+        cr.fill()
         n = len(self.items)
         if not n:
             return
         cw = w / n
         for i, (label, quiet) in enumerate(self.items):
-            if i:
-                cr.set_source_rgba(*C.line, 0.08)
-                cr.rectangle(i * cw, 6, 1, h - 12)
-                cr.fill()
-            self._text(cr, label, i * cw + cw / 2, h / 2, cw - 8, C.muted if quiet else C.text)
+            # каждый пункт — скруглённая «пилюля», чтобы было видно, куда тапать
+            _rrect(cr, i * cw + 2, 3, cw - 4, h - 6, min(10, (h - 6) / 2))
+            cr.set_source_rgba(*C.line, 0.03 if quiet else 0.07)
+            cr.fill()
+            self._text(cr, label, i * cw + cw / 2, h / 2, cw - 10, C.muted if quiet else C.text)
 
     @staticmethod
     def _text(cr, s, cx, cy, maxw, color):
