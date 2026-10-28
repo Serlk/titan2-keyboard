@@ -260,7 +260,8 @@ class Daemon:
             elif msg.get("cmd") == "app":
                 self.app_id = msg.get("id") or ""
                 self._update_terminal()
-            elif msg.get("cmd") == "mouse":
+            elif msg.get("cmd") in ("mouse", "passthrough"):
+                # режим мыши и меню питания titan-gestured: все клавиши — ему
                 self.mouse = bool(msg.get("on"))
                 log("режим мыши", "вкл" if self.mouse else "выкл")
             elif msg.get("cmd") == "reload":
