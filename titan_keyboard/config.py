@@ -37,6 +37,12 @@ suggestions = true
 autocorrect = true
 autocapitalize = true
 learn = true               # запоминать свои слова для подсказок
+
+# Буфер обмена: история (только в памяти, кроме закреплённого), панель — удержание sym.
+clipboard_history = true
+clipboard_limit = 30       # сколько записей помнить
+clipboard_days = 0         # забывать незакреплённое через N дней, 0 — не забывать
+clipboard_paste = true     # выбор в панели сразу вставляет; false — только копирует в буфер
 """
 
 
@@ -52,6 +58,10 @@ class Config:
     autocorrect: bool = True
     autocapitalize: bool = True
     learn: bool = True
+    clipboard_history: bool = True
+    clipboard_limit: int = 30
+    clipboard_days: int = 0
+    clipboard_paste: bool = True
     problems: list = field(default_factory=list)
 
 
@@ -107,6 +117,12 @@ def load(path=CONFIG, available_layouts=None):
     if cfg.long_press not in LONG_PRESS_MODES:
         cfg.problems.append(f"long_press: одно из {', '.join(LONG_PRESS_MODES)}")
         cfg.long_press = "alt"
+    if not 5 <= cfg.clipboard_limit <= 200:
+        cfg.problems.append("clipboard_limit: от 5 до 200")
+        cfg.clipboard_limit = min(200, max(5, cfg.clipboard_limit))
+    if not 0 <= cfg.clipboard_days <= 365:
+        cfg.problems.append("clipboard_days: от 0 до 365")
+        cfg.clipboard_days = min(365, max(0, cfg.clipboard_days))
     if available_layouts is not None:
         bad = [x for x in cfg.layouts if x not in available_layouts]
         if bad:

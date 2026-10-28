@@ -6,12 +6,18 @@ pkgdesc="Клавиатура Titan: модификаторы, слои, рас�
 url="https://github.com/"
 arch="noarch"
 license="GPL-3.0-or-later"
+makedepends="gettext"
 depends="python3 py3-evdev py3-gobject3 py3-pywayland gtk4-layer-shell wl-clipboard"
 options="!check"
 
 package() {
 	install -d "$pkgdir"/usr/lib/titan "$pkgdir"/usr/share/titan-keyboard
 	cp -r "$startdir"/titan_keyboard "$pkgdir"/usr/lib/titan/
+	for po in "$startdir"/po/*.po; do
+		lang=$(basename "$po" .po)
+		install -d "$pkgdir"/usr/share/locale/$lang/LC_MESSAGES
+		msgfmt -o "$pkgdir"/usr/share/locale/$lang/LC_MESSAGES/titan-keyboard.mo "$po"
+	done
 	cp -r "$startdir"/data "$pkgdir"/usr/share/titan-keyboard/
 	install -Dm644 "$startdir"/data/share/applications/org.titan.KeyboardSettings.desktop \
 		"$pkgdir"/usr/share/applications/org.titan.KeyboardSettings.desktop

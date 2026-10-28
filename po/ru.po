@@ -1,0 +1,68 @@
+# Russian translations for titan-keyboard package.
+# Copyright (C) 2026 THE titan-keyboard'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the titan-keyboard package.
+# Automatically generated, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: titan-keyboard\n"
+"Report-Msgid-Bugs-To: https://github.com/\n"
+"POT-Creation-Date: 2026-10-28 18:49+0300\n"
+"PO-Revision-Date: 2026-10-28 18:41+0300\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: titan_keyboard/clipboard_panel.py:34
+#, python-brace-format
+msgid "titan-keyboard is not running: {error}"
+msgstr "titan-keyboard не запущен: {error}"
+
+#: titan_keyboard/clipboard_panel.py:122 titan_keyboard/clipboard_panel.py:138
+msgid "Clipboard"
+msgstr "Буфер обмена"
+
+#: titan_keyboard/clipboard_panel.py:139
+msgid "Clear history"
+msgstr "Очистить"
+
+#: titan_keyboard/clipboard_panel.py:144
+msgid "Type to search the clipboard"
+msgstr "Печатайте — поиск по буферу"
+
+#: titan_keyboard/clipboard_panel.py:152
+msgid "Undo"
+msgstr "Отменить"
+
+#: titan_keyboard/clipboard_panel.py:165
+msgid "↑ ↓ choose · ↵ paste · Esc or tap outside — close"
+msgstr "↑ ↓ выбор · ↵ вставить · ◁ или тап мимо — закрыть"
+
+#: titan_keyboard/clipboard_panel.py:216
+msgid "Nothing found"
+msgstr "Ничего не найдено"
+
+#: titan_keyboard/clipboard_panel.py:216
+msgid "The clipboard is empty — copy something"
+msgstr "Буфер пуст — скопируйте что-нибудь"
+
+#: titan_keyboard/clipboard_panel.py:241
+msgid "Unpin"
+msgstr "Открепить"
+
+#: titan_keyboard/clipboard_panel.py:241
+msgid "Pin"
+msgstr "Закрепить"
+
+#: titan_keyboard/clipboard_panel.py:246
+msgid "Delete"
+msgstr "Удалить"
+
+#: titan_keyboard/clipboard_panel.py:271 titan_keyboard/clipboard_panel.py:281
+#, python-brace-format
+msgid "Clearing in {seconds} s"
+msgstr "Очистка через {seconds} с"

@@ -1,0 +1,68 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the titan-keyboard package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: titan-keyboard\n"
+"Report-Msgid-Bugs-To: https://github.com/\n"
+"POT-Creation-Date: 2026-10-28 18:49+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: titan_keyboard/clipboard_panel.py:34
+#, python-brace-format
+msgid "titan-keyboard is not running: {error}"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:122 titan_keyboard/clipboard_panel.py:138
+msgid "Clipboard"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:139
+msgid "Clear history"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:144
+msgid "Type to search the clipboard"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:152
+msgid "Undo"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:165
+msgid "↑ ↓ choose · ↵ paste · Esc or tap outside — close"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:216
+msgid "Nothing found"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:216
+msgid "The clipboard is empty — copy something"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:241
+msgid "Unpin"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:241
+msgid "Pin"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:246
+msgid "Delete"
+msgstr ""
+
+#: titan_keyboard/clipboard_panel.py:271 titan_keyboard/clipboard_panel.py:281
+#, python-brace-format
+msgid "Clearing in {seconds} s"
+msgstr ""

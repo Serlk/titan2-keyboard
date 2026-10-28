@@ -13,6 +13,7 @@
     {"ev": "field", "active": true, "purpose": 0, "private": false}
     {"ev": "titan", "on": true}      ввод захвачен (на ноутбуке — по F8)
     {"ev": "state", "layout": "qwerty", "shift": "off", "alt": "on", "sym": 0}
+    {"ev": "clipboard", "open": true}   открыта панель буфера (◁ — закрыть её)
 
 Команды подписчика: retract, app, reload, pick_x и {"cmd": "mouse", "on": true} —
 режим мыши titan-gestured: все клавиши уходят ему, ядро набора их не видит.
@@ -25,6 +26,7 @@ import os
 import re
 import signal
 import socket
+import subprocess
 import sys
 import time
 
@@ -37,7 +39,7 @@ from titan_device import keymaps
 from . import config
 from .autocorrect import AutoCorrector, policy, should_capitalize
 from .bar import ItemsBar, LedBar
-from .clipboard import ClipboardWatcher, History
+from .clipboard import PINS, ClipboardWatcher, History
 from .engine import DATA, Commit, Delete, Engine, Key, Keys
 from .expansion import Expander, shortcode_query
 from .ime import InputMethod
@@ -67,6 +69,8 @@ COMBO = {"ctrl": E.KEY_LEFTCTRL, "shift": E.KEY_LEFTSHIFT, "alt": E.KEY_LEFTALT,
          "end": E.KEY_END, "delete": E.KEY_DELETE}
 COMBO.update({c: getattr(E, f"KEY_{c.upper()}") for c in "abcdefghijklmnopqrstuvwxyz"})
 TEXT_RAW = {"ENTER", "BKSP"}
+PRIVATE_PURPOSES = {8, 9}  # zwp_text_input_v3.content_purpose: password, pin
+PASTE_WAIT_S = 1.0         # после панели ждём, пока поле ввода вернёт фокус, затем — Ctrl+V
 CTRL = {E.KEY_LEFTCTRL, E.KEY_RIGHTCTRL}
 
 
@@ -114,7 +118,11 @@ class Daemon:
         self.expander = Expander(prefix=self.cfg.snippet_prefix)
         self.suggester = Suggester()
         self.corrector = AutoCorrector()
-        self.clipboard = History()
+        self.clipboard = History(pins_path=PINS)
+        self._clipboard_config()
+        self.clip_panel = None
+        self.sym_hold = None            # (время, страница sym до нажатия) — удержание sym открывает буфер
+        self.paste_pending = None       # (текст, крайний срок) — вставить, когда поле вернётся
         self.entries = []               # пункты полосы: (подпись, приглушённо, действие)
         self.last_commit = None         # (клавиша, текст) — для отзыва, если нажатие стало жестом
         self.app_id = ""                # программа в фокусе (сообщает titan-gestured)
@@ -129,7 +137,7 @@ class Daemon:
         if not self.ime.available:
             log("IME занят другим методом ввода: буквы пойдут как обычные клавиши")
         self.ime.attach()
-        self.clip_watch = ClipboardWatcher(self.clipboard, self._refresh_items)
+        self.clip_watch = ClipboardWatcher(self.clipboard, self._clipboard_changed, private=self._private_field)
         self._listen()
         GLib.io_add_watch(self.kbd.fd, GLib.IO_IN, self._kbd_events)
         GLib.timeout_add(20, self._tick)
@@ -154,12 +162,28 @@ class Daemon:
             self.engine.layout = prev.layout     # раскладку при перечитывании не сбрасываем
         if getattr(self, "expander", None):
             self.expander.prefix = self.cfg.snippet_prefix
+        if getattr(self, "clipboard", None):
+            self._clipboard_config()
 
     def _first_variation(self, ch):
         v = self.variations.map.get(ch)
         return v[0] if v else None
 
     def _tick(self):
+        now = time.monotonic()
+        if self.sym_hold and now - self.t0 - self.sym_hold[0] >= self.engine.long_press_s:
+            # удержание sym — панель буфера; страница sym, на которую успели переключиться, отменяется
+            self.engine.sym_page = self.sym_hold[1]
+            self.sym_hold = None
+            self._state_changed()
+            self.open_clipboard()
+        if self.paste_pending and now > self.paste_pending[1]:
+            text, _deadline = self.paste_pending
+            self.paste_pending = None
+            self._paste_by_keys(text)          # поле так и не вернулось — вставим через буфер
+        self._expire_check = getattr(self, "_expire_check", 0) + 1
+        if self._expire_check % 3000 == 0 and self.clipboard.expire():    # раз в минуту
+            self._clipboard_changed()
         # долгое нажатие
         if self.titan and self.ime.state.active:
             actions = self.engine.tick(time.monotonic() - self.t0)
@@ -246,6 +270,8 @@ class Daemon:
                 self.suggester.learned = Learned()
                 log("настройки перечитаны по команде")
                 self._state_changed()
+            elif msg.get("cmd") == "clipboard":
+                self.open_clipboard()
             elif msg.get("cmd") == "pick_x" and self.entries:
                 self.pick(min(len(self.entries) - 1, int(float(msg["x"]) * len(self.entries))))
         return True
@@ -320,6 +346,13 @@ class Daemon:
         return {"active": st.active, "purpose": int(st.purpose), "private": st.private}
 
     def _field(self, st):
+        if self.paste_pending and st.active and self.ime.available:
+            text, _deadline = self.paste_pending
+            self.paste_pending = None
+            if self.ime.commit_string(text):     # прямо в поле, буфер не трогаем
+                log("буфер: вставлено в поле,", len(text), "симв.")
+            else:
+                self._paste_by_keys(text)
         self._update_terminal()
         self.publish(ev="field", **self._field_info())
         self._shell()
@@ -380,6 +413,10 @@ class Daemon:
                     entries.append((it.text, not it.replace_last,
                                     ("replace", before[-1:], it.text) if it.replace_last else ("insert", "", it.text)))
         self.entries = entries[:len(TERMINAL_KEYS) if self.engine.terminal else 7]
+        if self.titan and st.active and self.ime.available and not self.engine.terminal \
+                and self.cfg.clipboard_history and not self._private_field():
+            # вход в панель буфера — последним пунктом полосы
+            self.entries = self.entries[:6] + [("📋", True, ("clipboard", "", "open"))]
         if self.items_bar:
             self.items_bar.update([(label, quiet) for label, quiet, _ in self.entries])
         self.publish(ev="bar", n=len(self.entries))
@@ -394,6 +431,9 @@ class Daemon:
         if kind == "key":
             self._apply([Keys(new)])
             return
+        if kind == "clipboard":
+            self.open_clipboard()
+            return
         if kind == "mod":
             mod = self.engine.ctrl if new == "ctrl" else self.engine.meta
             mod.one_shot = not mod.one_shot and not mod.latched
@@ -407,6 +447,71 @@ class Daemon:
         self.ime.commit_string(new)
         self.corrector.accept()
         log("полоса:", kind, repr(old), "→", repr(new))
+
+    # ---------------------------------------------------------- буфер обмена
+
+    def _clipboard_config(self):
+        c = self.cfg
+        self.clipboard.enabled = c.clipboard_history
+        self.clipboard.limit = c.clipboard_limit
+        self.clipboard.max_age_s = c.clipboard_days * 86400 or None
+        del self.clipboard.entries[self.clipboard.limit:]
+        if not c.clipboard_history:
+            self.clipboard.clear()
+
+    def _private_field(self):
+        st = self.ime.state
+        return bool(st.active and (st.private or int(st.purpose) in PRIVATE_PURPOSES))
+
+    def _clipboard_changed(self):
+        self._refresh_items()
+        if self.clip_panel:
+            self.clip_panel.refresh()
+
+    def open_clipboard(self):
+        if self._private_field():
+            log("буфер: открыто поле пароля — панель не показываю")
+            return                               # в поле пароля историю не показываем
+        if self.clip_panel is None:
+            try:
+                from .clipboard_panel import ClipboardPanel
+            except Exception as e:               # без layer-shell — нет и панели
+                log("панель буфера недоступна:", e)
+                return
+            self.clip_panel = ClipboardPanel(self.clipboard, self._clipboard_chosen, self._clipboard_closed)
+        if self.clip_panel.is_open:
+            self.clip_panel.close()              # повторный вызов — закрыть
+            return
+        # куда вставлять: поле, открытое сейчас (на время панели оно теряет фокус)
+        self.paste_into_field = bool(self.ime.state.active and self.ime.available)
+        self.clip_panel.open()
+        self.publish(ev="clipboard", open=True)
+
+    def _clipboard_closed(self):
+        self.publish(ev="clipboard", open=False)
+
+    def _clipboard_chosen(self, text):
+        if self.paste_into_field and self.cfg.clipboard_paste:
+            self.paste_pending = (text, time.monotonic() + PASTE_WAIT_S)
+            return
+        self._copy(text)
+        if self.cfg.clipboard_paste:
+            GLib.timeout_add(150, lambda: (self._paste_keys(), False)[1])
+
+    def _copy(self, text):
+        try:
+            subprocess.run(["wl-copy"], input=text.encode(), timeout=2)
+        except (OSError, subprocess.SubprocessError) as e:
+            log("wl-copy:", e)
+
+    def _paste_by_keys(self, text):
+        self._copy(text)
+        self._paste_keys()
+
+    def _paste_keys(self):
+        # в терминале Ctrl+V — это не вставка
+        combo = "ctrl+shift+v" if TERMINAL_APPS.match(self.app_id) else "ctrl+v"
+        self._apply([Keys(combo)])
 
     def _policy(self):
         """Что можно в этом поле: тип поля (policy) и выключатели из настроек."""
@@ -562,6 +667,13 @@ class Daemon:
         if value == 1 and name not in ("SHIFT", "ALT", "FN", "SYM"):
             self.corrector.accept()
 
+        if field and name == "SYM":
+            if value == 1:
+                self.sym_hold = (t, self.engine.sym_page)
+            elif self.sym_hold is not None:
+                self.sym_hold = None
+        elif value == 1 and self.sym_hold is not None:
+            self.sym_hold = None                 # sym + другая клавиша — не удержание
         if field and name in ENGINE_KEYS:
             if value == 1 and len(name) == 1:
                 self._maybe_autocap()
