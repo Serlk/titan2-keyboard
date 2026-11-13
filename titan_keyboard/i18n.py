@@ -1,6 +1,6 @@
 """Переводы (gettext, домен titan-keyboard). Строки в коде — по-английски: _("Clipboard").
 
-Из репозитория берём packages/titan-keyboard/locale (собирает scripts/i18n),
+Из репозитория берём locale/ (собирает scripts/i18n),
 после установки — системный /usr/share/locale. Язык — как обычно, LANGUAGE/LC_ALL/LANG.
 """
 

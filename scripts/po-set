@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Вписать переводы в .po: scripts/po-set packages/<пакет>/po/ru.po < переводы.tsv
+
+Строка входа: английский<TAB>перевод. Заполняет только однострочные msgid
+(для ngettext и многострочных правьте .po руками). Снимает пометку fuzzy.
+"""
+import re
+import sys
+
+
+def esc(s):
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+po = sys.argv[1]
+pairs = {}
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if "\t" in line and not line.startswith("#"):
+        en, tr = line.split("\t", 1)
+        pairs[esc(en)] = esc(tr)
+text = open(po, encoding="utf-8").read()
+blocks = text.split("\n\n")
+done = 0
+for i, b in enumerate(blocks):
+    m = re.search(r'^msgid "(.*)"\nmsgstr "(.*)"$', b, re.M)
+    if m and m.group(1) in pairs:
+        b = b[:m.start(2)] + pairs[m.group(1)] + b[m.end(2):]
+        b = re.sub(r"^#, fuzzy\n", "", b, flags=re.M).replace(", fuzzy", "")
+        blocks[i] = b
+        done += 1
+text = "\n\n".join(blocks)
+text = text.replace('"Content-Type: text/plain; charset=ASCII\\n"', '"Content-Type: text/plain; charset=UTF-8\\n"')
+open(po, "w", encoding="utf-8").write(text)
+print(f"{po}: вписано {done} из {len(pairs)}")

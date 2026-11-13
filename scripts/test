@@ -1,0 +1,4 @@
+#!/bin/sh
+# Тесты: scripts/test
+cd "$(dirname "$0")/.." || exit 1
+exec python3 -m unittest discover -q -s tests -t .

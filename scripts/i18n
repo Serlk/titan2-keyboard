@@ -1,0 +1,30 @@
+#!/bin/sh
+# Переводы (gettext): строки в коде — по-английски в _("…"), переводы — po/<язык>.po.
+#   scripts/i18n   извлечь строки (.pot), обновить .po, собрать .mo в locale/
+# Языки — po/LINGUAS. Домен gettext — titan-keyboard.
+# Переводы можно дописывать и в po/<язык>-<что угодно>.tsv (английский<TAB>перевод) —
+# скрипт вливает их в .po (scripts/po-set).
+# .mo в репозиторий не кладём (locale/ в .gitignore): APKBUILD собирает их msgfmt при сборке.
+set -e
+dir=$(cd "$(dirname "$0")/.." && pwd)
+pkg=titan-keyboard
+mod=titan_keyboard
+pot="$dir/po/$pkg.pot"
+(cd "$dir" && find "$mod" -name '*.py' | sort | xargs xgettext --no-wrap -L Python --from-code=UTF-8 \
+    --keyword=_ --keyword=N_ --keyword=ngettext:1,2 --keyword=pgettext:1c,2 --add-comments=TRANSLATORS \
+    --package-name="$pkg" --msgid-bugs-address=https://github.com/ -o "po/$pkg.pot")
+for lang in $(grep -v '^#' "$dir/po/LINGUAS"); do
+    po="$dir/po/$lang.po"
+    if [ -f "$po" ]; then
+        msgmerge -q --no-wrap -U --backup=none "$po" "$pot"
+    else
+        msginit --no-wrap -i "$pot" -o "$po" -l "$lang" --no-translator >/dev/null 2>&1
+    fi
+    for tsv in "$dir/po/$lang"-*.tsv; do
+        [ -f "$tsv" ] && "$dir/scripts/po-set" "$po" < "$tsv" >/dev/null
+    done
+    mkdir -p "$dir/locale/$lang/LC_MESSAGES"
+    msgfmt -c -o "$dir/locale/$lang/LC_MESSAGES/$pkg.mo" "$po"
+    left=$(msgattrib --untranslated "$po" 2>/dev/null | grep -c '^msgid ' || true)
+    [ "$left" -gt 1 ] && echo "$pkg/$lang: без перевода $((left - 1))" || true
+done

@@ -34,7 +34,7 @@ import evdev
 from evdev import UInput, ecodes as E
 from gi.repository import GLib
 
-from titan_device import keymaps
+from .device import keymaps
 
 from . import config
 from .autocorrect import AutoCorrector, policy, should_capitalize

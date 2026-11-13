@@ -1,7 +1,7 @@
 """Страница sym на экране — как в Plektra: символы страницы на местах клавиш.
 
 Пока sym включён, над полосами показывается карта трёх буквенных рядов
-Titan 2 (геометрия из titan_device.layout) с символами текущей страницы;
+Titan 2 (геометрия из titan_keyboard.device.layout) с символами текущей страницы;
 тап по клавише на экране вставляет её символ. Нажатие самой клавиши на
 клавиатуре работает как раньше.
 """
@@ -15,7 +15,7 @@ from gi.repository import Gtk, Gtk4LayerShell as LS, Pango, PangoCairo  # noqa: 
 
 import cairo  # noqa: E402
 
-from titan_device import layout  # noqa: E402
+from .device import layout  # noqa: E402
 
 from .bar import _rrect  # noqa: E402
 from .theme import C, follow  # noqa: E402

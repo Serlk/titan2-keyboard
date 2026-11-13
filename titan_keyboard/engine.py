@@ -29,7 +29,10 @@ import json
 import os
 from dataclasses import dataclass
 
+# из рабочего дерева — data/ рядом с пакетом, после установки (APKBUILD) — /usr/share/titan-keyboard/data
 DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "plektra")
+if not os.path.isdir(DATA):
+    DATA = "/usr/share/titan-keyboard/data/plektra"
 DOUBLE_TAP_S = 0.5     # Plektra: doubleTapThreshold = 500 мс
 MULTITAP_S = 0.45
 
