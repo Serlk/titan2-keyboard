@@ -1,81 +1,83 @@
 # titan2-keyboard
 
-Клавиатура Titan для Linux — реализация, совместимая с [Plektra](https://github.com/djbclark/plektra-djbclark)
-(GPLv3) по данным и поведению. Работает отдельно от остальной оболочки Titan, в любом Wayland-композиторе
-с `zwp_input_method_manager_v2` (niri, sway, Hyprland).
+**English** · [Русский](README.ru.md)
 
-Изначально — пакет `titan-keyboard` из Titan DE; вынесен в отдельный репозиторий вместе с историей.
+Titan keyboard for Linux — an implementation compatible with [Plektra](https://github.com/djbclark/plektra-djbclark)
+(GPLv3) in data and behavior. It runs independently of the rest of the Titan shell, in any Wayland compositor
+that supports `zwp_input_method_manager_v2` (niri, sway, Hyprland).
 
-## Зависимости
+Originally the `titan-keyboard` package of Titan DE; split out into a standalone repository together with its history.
 
-Python ≥ 3.11, `evdev`, PyGObject (GTK 4, libadwaita для программы настроек), pycairo, `pywayland`,
-`gtk4-layer-shell`, `wl-clipboard`. Для сборки переводов — `gettext`.
+## Dependencies
+
+Python ≥ 3.11, `evdev`, PyGObject (GTK 4; libadwaita for the settings app), pycairo, `pywayland`,
+`gtk4-layer-shell`, `wl-clipboard`. Building translations requires `gettext`.
 
 Alpine / postmarketOS: `apk add python3 py3-evdev py3-gobject3 py3-cairo py3-pywayland gtk4.0 libadwaita gtk4-layer-shell wl-clipboard`.
 
-Демону нужен доступ к `/dev/input` (клавиатуру он захватывает) и к `/dev/uinput` (виртуальная клавиатура).
+The daemon needs access to `/dev/input` (it grabs the keyboard) and to `/dev/uinput` (virtual keyboard).
 
-## Запуск
+## Running
 
-Из рабочего дерева:
+From the working tree:
 
 ```
-LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so python3 -m titan_keyboard.daemon   # демон клавиатуры
-python3 -m titan_keyboard.settings                                            # «Клавиатура Titan»
-python3 -m titan_keyboard.clipboard_panel                                     # панель буфера обмена
-WAYLAND_DISPLAY=… python3 -m titan_keyboard.ime "текст"                       # проверка IME: вставить строку
-scripts/test                                                                  # тесты
+LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so python3 -m titan_keyboard.daemon   # keyboard daemon
+python3 -m titan_keyboard.settings                                            # "Titan Keyboard" settings
+python3 -m titan_keyboard.clipboard_panel                                     # clipboard panel
+WAYLAND_DISPLAY=… python3 -m titan_keyboard.ime "text"                        # IME check: insert a string
+scripts/test                                                                  # tests
 scripts/i18n                                                                  # .pot → .po → locale/*.mo
 ```
 
-Пакет для Alpine: `abuild -r` в корне репозитория. Ставит `titan-keyboard` (демон), `titan-keyboard-settings`
-и `.desktop` настроек; код — в `/usr/lib/titan/titan_keyboard`, данные — в `/usr/share/titan-keyboard/data`.
+Alpine package: `abuild -r` in the repository root. It installs `titan-keyboard` (the daemon), `titan-keyboard-settings`
+and the settings `.desktop` file; code goes to `/usr/lib/titan/titan_keyboard`, data to `/usr/share/titan-keyboard/data`.
 
-Настройки — `~/.config/titan/keyboard/config.toml` (перечитываются на лету, команда `reload`),
-выученные слова — `~/.local/share/titan/keyboard/learned.json`, история буфера — `$XDG_DATA_HOME/titan/clipboard.json`.
+Settings live in `~/.config/titan/keyboard/config.toml` (reloaded on the fly, `reload` command),
+learned words in `~/.local/share/titan/keyboard/learned.json`, clipboard history in `$XDG_DATA_HOME/titan/clipboard.json`.
 
-## Устройство
+## Layout of the code
 
-- `titan_keyboard/engine.py` — ядро: модификаторы ⇧ и alt (тап — один символ, двойной тап — фиксация,
-  удержание), alt-слой устройства, страницы sym, мульти-тап, раскладки; ⇧+пробел — следующая раскладка.
-- `titan_keyboard/daemon.py` — демон: владеет физической клавиатурой, в поле ввода ведёт набор через ядро,
-  вне поля отдаёт клавиши подписчикам (см. «Связь с другими программами»).
-- `titan_keyboard/words.py` — подсказки слов (словари Plektra en/ru, дополнение по началу, опечатки
-  на одну правку, регистр как у набранного), обучение своим словам и «следующему слову».
-- `titan_keyboard/autocorrect.py` — автокоррекция по словарю опечаток Plektra (отмена ⌫ сразу после),
-  автозаглавная (начало поля, после . ! ? с пробелом), правила по типу поля: в url, почте, паролях,
-  PIN, числах и терминале — без подсказок, коррекции, заглавной и обучения.
-- `titan_keyboard/expansion.py`, `variations.py` — сниппеты `!…`, шорткоды `:…`, вариации букв.
-- `titan_keyboard/clipboard.py`, `clipboard_panel.py` — история буфера через `wl-paste --watch`
-  (data-control) и её панель; записи менеджеров паролей пропускаются. Страница «буфер» — четвёртая по sym.
-- `titan_keyboard/ime.py` — IME-клиент `input-method-v2`: вставка Unicode, удаление перед курсором,
-  предредактирование, тип поля (пароль/PIN не подсказываются и не запоминаются).
-- `titan_keyboard/bar.py`, `symview.py`, `theme.py` — полоса подсказок и страница sym на экране (layer-shell).
-- `titan_keyboard/settings.py` — программа настроек (libadwaita): раскладки, паузы, помощь при наборе,
-  сниппеты, свои исправления, выученные слова.
-- `titan_keyboard/device/` — профиль железа Titan 2: геометрия клавиш (`layout`) и коды клавиш (`keymaps`).
-  Копия `titan_device` из Titan DE; если пакет `titan-device` установлен, используется он.
-- `data/plektra/` — данные Plektra без изменений (`scripts/sync-plektra <клон>`), версия в `UPSTREAM`.
-- `data/dict/` — словари (`scripts/sync-dicts <клон-plektra>`): производные Leipzig Corpora Collection
-  (CC-BY 3.0) через Plektra / plektra-dict (GPLv3), см. `data/dict/NOTICE.md`.
-- `protocols/` — XML протоколов; `titan_keyboard/protocols/` сгенерирован `pywayland.scanner`.
-- `po/` — переводы (gettext, домен `titan-keyboard`); дописывать можно в `po/<язык>-*.tsv`.
+- `titan_keyboard/engine.py` — the core: ⇧ and alt modifiers (tap — one character, double tap — lock,
+  hold), the device alt layer, sym pages, multi-tap, layouts; ⇧+space switches to the next layout.
+- `titan_keyboard/daemon.py` — the daemon: owns the physical keyboard; inside a text field it types through the core,
+  outside one it hands keys to subscribers (see "Talking to other programs").
+- `titan_keyboard/words.py` — word suggestions (Plektra en/ru dictionaries, prefix completion, one-edit
+  typo tolerance, case matching what was typed), learning your own words and "next word" predictions.
+- `titan_keyboard/autocorrect.py` — autocorrection from the Plektra typo dictionary (undo with ⌫ right after),
+  auto-capitalization (start of field, after . ! ? followed by a space), per-field-type rules: in URL, email,
+  password, PIN, number and terminal fields — no suggestions, correction, capitalization or learning.
+- `titan_keyboard/expansion.py`, `variations.py` — `!…` snippets, `:…` shortcodes, letter variations.
+- `titan_keyboard/clipboard.py`, `clipboard_panel.py` — clipboard history via `wl-paste --watch`
+  (data-control) and its panel; password manager entries are skipped. The "clipboard" page is the fourth sym page.
+- `titan_keyboard/ime.py` — `input-method-v2` IME client: Unicode insertion, deleting before the cursor,
+  preedit, field type (password/PIN fields get no suggestions and are not learned).
+- `titan_keyboard/bar.py`, `symview.py`, `theme.py` — the suggestion bar and on-screen sym page (layer-shell).
+- `titan_keyboard/settings.py` — settings app (libadwaita): layouts, timings, typing assistance,
+  snippets, custom corrections, learned words.
+- `titan_keyboard/device/` — Titan 2 hardware profile: key geometry (`layout`) and key codes (`keymaps`).
+  A copy of `titan_device` from Titan DE; if the `titan-device` package is installed, it is used instead.
+- `data/plektra/` — unmodified Plektra data (`scripts/sync-plektra <clone>`), version in `UPSTREAM`.
+- `data/dict/` — dictionaries (`scripts/sync-dicts <plektra-clone>`): derived from the Leipzig Corpora Collection
+  (CC-BY 3.0) via Plektra / plektra-dict (GPLv3), see `data/dict/NOTICE.md`.
+- `protocols/` — protocol XML; `titan_keyboard/protocols/` is generated by `pywayland.scanner`.
+- `po/` — translations (gettext, domain `titan-keyboard`); additions can go to `po/<lang>-*.tsv`.
 
-Полоса над подписями: `!сниппет`/`:шорткод` → совпадения; пока набирается слово — до 3 подсказок
-(выбор тапом или броском вверх в трети сенсора, слово заменяется подсказкой с пробелом);
-после пробела — предсказание следующего слова; иначе — вариации последней буквы или пунктуация.
+The bar above the key labels: `!snippet`/`:shortcode` → matches; while a word is being typed — up to 3 suggestions
+(pick by tap or by an upward flick in a third of the sensor; the word is replaced by the suggestion plus a space);
+after a space — next-word prediction; otherwise — variations of the last letter or punctuation.
 
-## Связь с другими программами
+## Talking to other programs
 
-Всё необязательно: без них клавиатура работает сама.
+All optional: the keyboard works on its own without them.
 
-- **Сокет** `$XDG_RUNTIME_DIR/titan-keyboard.sock` (JSON по строке) — поток событий подписчикам
-  (`key`, `field`, `titan`, `state`, `clipboard`) и команды (`retract`, `app`, `reload`, `pick_x`,
-  `mouse`, `clipboard`). Формат — в начале `titan_keyboard/daemon.py`. В Titan DE подписчик — `titan-gestured`.
-- `$XDG_RUNTIME_DIR/titan-shell.sock` — если есть `titan-shell`, ему уходит состояние раскладки и модификаторов.
-- `titan_theme` — если установлен, полосы и панель буфера берут тему Titan («стекло», цвета).
-- Titan DE «Настройки → Клавиатура» импортирует `titan_keyboard.config` и `titan_keyboard.settings`.
+- **Socket** `$XDG_RUNTIME_DIR/titan-keyboard.sock` (one JSON object per line) — an event stream for subscribers
+  (`key`, `field`, `titan`, `state`, `clipboard`) and commands (`retract`, `app`, `reload`, `pick_x`,
+  `mouse`, `clipboard`). The format is documented at the top of `titan_keyboard/daemon.py`. In Titan DE the subscriber is `titan-gestured`.
+- `$XDG_RUNTIME_DIR/titan-shell.sock` — if `titan-shell` is running, it receives the layout and modifier state.
+- `titan_theme` — if installed, the bars and the clipboard panel follow the Titan theme ("glass", colors).
+- Titan DE "Settings → Keyboard" imports `titan_keyboard.config` and `titan_keyboard.settings`.
 
-## Лицензия
+## License
 
-GPL-3.0-or-later (`LICENSE`). Данные Plektra — GPLv3 (`data/plektra/LICENSE`), словари — см. `data/dict/NOTICE.md`.
+GPL-3.0-or-later (`LICENSE`). Plektra data — GPLv3 (`data/plektra/LICENSE`), dictionaries — see `data/dict/NOTICE.md`.
